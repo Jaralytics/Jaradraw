@@ -201,7 +201,9 @@ export function connectNodes(
   if (!allowOverlap && overlaps(getElementBounds(source), getElementBounds(target))) return null
   const from = centerOf(source)
   const to = centerOf(target)
-  const base = createLinear('arrow', from.x, from.y, styleForNew(defaults, 'arrow'))
+  // connectors stay straight even when "Codo" is the default path type
+  const style = { ...defaults, curve: defaults.curve === 'elbow' ? ('sharp' as const) : defaults.curve }
+  const base = createLinear('arrow', from.x, from.y, styleForNew(style, 'arrow'))
   const arrow = {
     ...withAbsolutePoints(base, [
       [from.x, from.y],

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createShape, createText } from './factory'
-import { applyStyleToElement, cornerRadius, roundnessFor, styleForNew, DEFAULT_STYLE_DEFAULTS } from './style'
+import { createLinear, createShape, createText } from './factory'
+import { withAbsolutePoints } from './geometry'
+import type { LinearElement } from './types'
+import { applyStyleToElement, cornerRadius, curveOf, roundnessFor, styleForNew, DEFAULT_STYLE_DEFAULTS } from './style'
 import { parseScene } from '../scene/serialize'
 
 describe('roundness', () => {
@@ -56,5 +58,80 @@ describe('style application', () => {
     expect(s).toMatchObject({ strokeWidth: 4, roundness: { type: 3 } })
     expect('edges' in s).toBe(false)
     expect('roundness' in styleForNew({ ...DEFAULT_STYLE_DEFAULTS, edges: 'round' }, 'ellipse')).toBe(false)
+  })
+})
+
+describe('curve option', () => {
+  const arrow = (extra: Record<string, unknown> = {}) =>
+    ({ ...withAbsolutePoints(createLinear('arrow', 0, 0), [[0, 0], [100, 0], [100, 60]]), ...extra }) as LinearElement
+
+  it('maps elbow to elbowed arrows and sharp for lines in styleForNew', () => {
+    const d = { ...DEFAULT_STYLE_DEFAULTS, curve: 'elbow' as const }
+    expect(styleForNew(d, 'arrow')).toMatchObject({ elbowed: true, roundness: null })
+    const line = styleForNew(d, 'line')
+    expect(line.elbowed).toBeUndefined()
+    expect(line.roundness).toBeNull()
+  })
+
+  it('applies elbow to arrows and treats it as sharp on lines', () => {
+    const a = applyStyleToElement(arrow({ roundness: { type: 2 } }), { curve: 'elbow' }) as LinearElement
+    expect(a.elbowed).toBe(true)
+    expect(a.roundness).toBeNull()
+    const line = applyStyleToElement(createLinear('line', 0, 0, { roundness: { type: 2 } }), { curve: 'elbow' }) as LinearElement
+    expect(line.elbowed).not.toBe(true)
+    expect(line.roundness).toBeNull()
+  })
+
+  it('collapses an elbow arrow to a straight one when switching away', () => {
+    const e = arrow({ elbowed: true })
+    const sharp = applyStyleToElement(e, { curve: 'sharp' }) as LinearElement
+    expect(sharp.elbowed).toBe(false)
+    expect(sharp.points).toEqual([[0, 0], [100, 60]])
+    expect(sharp.width).toBe(100)
+    expect(sharp.height).toBe(60)
+    const curved = applyStyleToElement(e, { curve: 'curved' }) as LinearElement
+    expect(curved.points).toHaveLength(2)
+    expect(curved.roundness).toEqual({ type: 2 })
+  })
+
+  it('leaves a non-elbow arrow with the previous behaviour', () => {
+    const a = arrow()
+    const sharp = applyStyleToElement(a, { curve: 'sharp' }) as LinearElement
+    expect(sharp.points).toEqual(a.points)
+    expect(sharp.elbowed).toBe(false)
+  })
+
+  it('reads elbow from an imported arrow', () => {
+    const p = parseScene({ elements: [{ id: 'x', type: 'arrow', elbowed: true, roundness: null }] })!
+    expect(curveOf(p.elements[0] as LinearElement)).toBe('elbow')
+    expect(curveOf(arrow({ roundness: { type: 2 } }))).toBe('curved')
+    expect(curveOf(arrow())).toBe('sharp')
+  })
+})
+
+describe('leaving elbow', () => {
+  it('keeps the real first and last points of a free arrow', () => {
+    const e = {
+      ...withAbsolutePoints(createLinear('arrow', 0, 0), [[50, 70], [150, 70], [150, 130]]),
+      elbowed: true,
+    } as LinearElement
+    const out = applyStyleToElement(e, { curve: 'sharp' }) as LinearElement
+    expect(out.x).toBe(50)
+    expect(out.y).toBe(70)
+    expect(out.points).toEqual([[0, 0], [100, 60]])
+  })
+
+  it('resets the elbow bookkeeping fields', () => {
+    const e = {
+      ...withAbsolutePoints(createLinear('arrow', 0, 0), [[0, 0], [100, 0], [100, 60]]),
+      elbowed: true,
+      fixedSegments: [{ index: 1, start: [1, 1], end: [2, 2] }],
+      startIsSpecial: true,
+      endIsSpecial: true,
+    } as LinearElement
+    const out = applyStyleToElement(e, { curve: 'curved' }) as LinearElement
+    expect(out.fixedSegments).toBeNull()
+    expect(out.startIsSpecial).toBeNull()
+    expect(out.endIsSpecial).toBeNull()
   })
 })

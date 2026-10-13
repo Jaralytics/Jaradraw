@@ -1,4 +1,4 @@
-import type { Roundness, SceneElement, TextElement } from './types'
+import type { LinearElement, Roundness, SceneElement, TextElement } from './types'
 import { measureText } from './text'
 import { isRenderable, isShape, isLinear, isText } from './types'
 import { DEFAULT_STYLE, updateElement } from './factory'
@@ -6,7 +6,7 @@ import type { StyleProps } from './factory'
 
 export type Edges = 'sharp' | 'round'
 
-export type Curve = 'sharp' | 'curved'
+export type Curve = 'sharp' | 'curved' | 'elbow'
 
 export interface StyleDefaults extends StyleProps {
   edges: Edges
@@ -49,13 +49,42 @@ export function roundnessFor(type: string, edges: Edges): Roundness | undefined 
 export function styleForNew(
   d: StyleDefaults,
   type: string,
-): Partial<StyleProps> & { roundness?: Roundness; startArrowhead?: string | null; endArrowhead?: string | null } {
+): Partial<StyleProps> & {
+  roundness?: Roundness
+  startArrowhead?: string | null
+  endArrowhead?: string | null
+  elbowed?: boolean
+} {
   const { edges, curve, startArrowhead, endArrowhead, fontSize: _fs, textAlign: _ta, ...style } = d
   const linear = type === 'line' || type === 'arrow'
   const roundness = roundnessFor(type, linear ? (curve === 'curved' ? 'round' : 'sharp') : edges)
   const out: ReturnType<typeof styleForNew> = roundness === undefined ? style : { ...style, roundness }
-  if (type === 'arrow') return { ...out, startArrowhead, endArrowhead }
+  if (type === 'arrow') return { ...out, startArrowhead, endArrowhead, ...(curve === 'elbow' ? { elbowed: true } : {}) }
   return out
+}
+
+/** Curve option an element currently shows: elbow arrows read as 'elbow'. */
+export function curveOf(el: LinearElement): Curve {
+  if (el.elbowed === true) return 'elbow'
+  return el.roundness ? 'curved' : 'sharp'
+}
+
+/** Patch that applies a curve option to a linear element; lines never elbow. */
+function curvePatch(el: LinearElement, curve: Curve): Record<string, unknown> {
+  if (curve === 'elbow' && el.type === 'arrow') return el.elbowed === true ? {} : { elbowed: true, roundness: null }
+  const patch: Record<string, unknown> = { roundness: roundnessFor(el.type, curve === 'curved' ? 'round' : 'sharp') }
+  if (el.elbowed === true) {
+    // leaving elbow collapses the route to a straight arrow, which reconcile re-snaps to its shapes
+    const last = el.points[el.points.length - 1]
+    patch.elbowed = false
+    patch.fixedSegments = null
+    patch.startIsSpecial = null
+    patch.endIsSpecial = null
+    patch.points = [el.points[0], last]
+    patch.width = Math.abs(last[0] - el.points[0][0])
+    patch.height = Math.abs(last[1] - el.points[0][1])
+  }
+  return patch
 }
 
 /** Corner radius in scene units for rectangles and diamonds (0 when sharp). */
@@ -111,7 +140,7 @@ export function applyStyleToElement(el: SceneElement, patch: StylePatch): SceneE
     if (r !== undefined) next.roundness = r
   }
   if (patch.curve !== undefined && isLinear(el)) {
-    next.roundness = roundnessFor(el.type, patch.curve === 'curved' ? 'round' : 'sharp')
+    Object.assign(next, curvePatch(el, patch.curve))
   }
   if (isText(el)) {
     const change: { fontSize?: number; textAlign?: TextElement['textAlign'] } = {}

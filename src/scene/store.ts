@@ -23,6 +23,7 @@ import {
   expandWithLabels,
   getLabel,
   reconcile,
+  rerouteElbowArrow,
   unbindArrowEnd,
 } from '../element/relations'
 import { removePoint } from '../element/points'
@@ -576,6 +577,11 @@ export const useStore = create<State>()((set, get) => {
         if (ends.start) next = bindArrowEnd(next, el.id, 'start', ends.start)
         if (ends.end) next = bindArrowEnd(next, el.id, 'end', ends.end)
       }
+      if (isLinear(el) && el.type === 'arrow' && el.elbowed === true) {
+        // a new elbow arrow has no previous version, so reconcile does not route it
+        const found = (id: string) => next.find((e) => e.id === id)
+        next = next.map((e) => (e.id === el.id && isLinear(e) ? rerouteElbowArrow(e, found) : e))
+      }
       set({
         elements: assignFrames(reconcile(prev, next), new Set([el.id])),
         selectedIds: [el.id],
@@ -745,7 +751,8 @@ export const useStore = create<State>()((set, get) => {
         ? mapIfChanged(elements, (e) => (ids.has(e.id) ? applyStyleToElement(e, patch) : e))
         : elements
       set({ defaults: { ...defaults, ...patch }, elements: reconcile(elements, mapped) })
-      checkpoint(`style:${Object.keys(patch).join(',')}:${selectedIds.join(',')}`, true)
+      // a curve choice is a discrete step, never merged with the previous one
+      checkpoint(`style:${Object.keys(patch).join(',')}:${selectedIds.join(',')}`, !('curve' in patch))
     },
 
     reorderSelection: (op) => {

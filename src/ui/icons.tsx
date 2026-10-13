@@ -191,8 +191,16 @@ export const HeadIcon = ({ kind, flip }: { kind: string; flip?: boolean }) => (
   </Icon>
 )
 
-export const CurveIcon = ({ curved }: { curved: boolean }) => (
-  <Icon>{curved ? <path d="M3.5 15C6 5 10 17 16.5 5" /> : <path d="M3.5 15 8 7l4 8 4.5-10" />}</Icon>
+export const CurveIcon = ({ curved, elbow = false }: { curved: boolean; elbow?: boolean }) => (
+  <Icon>
+    {elbow ? (
+      <path d="M3.5 15h6V5h7" />
+    ) : curved ? (
+      <path d="M3.5 15C6 5 10 17 16.5 5" />
+    ) : (
+      <path d="M3.5 15 8 7l4 8 4.5-10" />
+    )}
+  </Icon>
 )
 
 export const PointsIcon = () => (

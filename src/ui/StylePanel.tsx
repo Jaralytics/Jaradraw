@@ -1,8 +1,9 @@
 import { useId, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useStore } from '../scene/store'
-import type { SceneElement, TextElement } from '../element/types'
+import type { LinearElement, SceneElement, TextElement } from '../element/types'
 import { isLinear, isRenderable, isShape, isText } from '../element/types'
+import { curveOf } from '../element/style'
 import type { Curve, Edges, StyleDefaults } from '../element/style'
 import type { FillStyle, StrokeStyle } from '../element/types'
 import { TextAlignIcon, CurveIcon, DashIcon, EdgeIcon, FillIcon, HeadIcon, RoughIcon, WidthIcon, ChevronIcon } from './icons'
@@ -241,7 +242,9 @@ export function StylePanel() {
     (e) => (e.roundness ? 'round' : 'sharp') as Edges,
     defaults.edges,
   )
-  const curve = pick(isLinear, (e) => (e.roundness ? 'curved' : 'sharp') as Curve, defaults.curve)
+  const showElbow = has('arrow')
+  const curveValue = pick(isLinear, (e) => curveOf(e as LinearElement), defaults.curve)
+  const curve = curveValue === 'elbow' && !showElbow ? 'sharp' : curveValue
   const isArrow = (e: SceneElement) => e.type === 'arrow'
   const headOf = (key: 'startArrowhead' | 'endArrowhead') => (e: SceneElement) =>
     normalizeArrowhead((e as unknown as Record<string, unknown>)[key]) ?? 'none'
@@ -349,6 +352,7 @@ export function StylePanel() {
               options={[
                 { value: 'sharp', label: 'Recto', icon: <CurveIcon curved={false} /> },
                 { value: 'curved', label: 'Curvo', icon: <CurveIcon curved /> },
+                ...(showElbow ? [{ value: 'elbow' as const, label: 'Codo', icon: <CurveIcon curved={false} elbow /> }] : []),
               ]}
             />
           )}

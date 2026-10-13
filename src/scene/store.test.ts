@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createShape } from '../element/factory'
+import { createLinear, createShape } from '../element/factory'
+import { withAbsolutePoints } from '../element/geometry'
+import { createLabel } from '../element/label'
+import { attachLabel } from '../element/relations'
+import { outlinePointToward } from '../element/bind'
+import { DEFAULT_STYLE_DEFAULTS, styleForNew } from '../element/style'
+import type { LinearElement, SceneElement } from '../element/types'
 import { useStore } from './store'
 import { DEFAULT_APP_STATE } from './serialize'
 import { DEFAULT_VIEWPORT } from './viewport'
@@ -157,5 +163,158 @@ describe('point deletion', () => {
     st().nudgeSelection(1, 0)
     st().flushPending()
     expect(st().history.stack.length).toBe(n + 1)
+  })
+})
+
+describe('elbow path type', () => {
+  const rectAt = (x: number, y: number) => ({ ...createShape('rectangle', x, y), width: 100, height: 50 })
+  const arrowOf = () => live().find((e) => e.type === 'arrow') as LinearElement
+  const absPoints = (a: LinearElement) => a.points.map(([x, y]) => ({ x: a.x + x, y: a.y + y }))
+  const axisAligned = (a: LinearElement) => {
+    const p = absPoints(a)
+    return p.every((q, i) => i === 0 || Math.abs(q.x - p[i - 1].x) < 1e-6 || Math.abs(q.y - p[i - 1].y) < 1e-6)
+  }
+
+  function setup() {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const a = rectAt(0, 0)
+    const b = rectAt(300, 40)
+    st().commitDraft(a)
+    st().commitDraft(b)
+    const arrow = withAbsolutePoints(createLinear('arrow', 100, 25), [[100, 25], [300, 65]])
+    st().commitDraft(arrow, { start: a.id, end: b.id })
+    return { a, b, id: arrow.id }
+  }
+
+  it('applies elbow, sharp and curved to a bound arrow', () => {
+    const { a, b } = setup()
+    st().applyStyle({ curve: 'elbow' })
+    let arrow = arrowOf()
+    expect(arrow.elbowed).toBe(true)
+    expect(arrow.roundness).toBeNull()
+    expect(axisAligned(arrow)).toBe(true)
+    expect(arrow.points.length).toBeGreaterThan(2)
+
+    st().applyStyle({ curve: 'sharp' })
+    arrow = arrowOf()
+    expect(arrow.elbowed).toBe(false)
+    expect(arrow.points).toHaveLength(2)
+    expect(arrow.roundness).toBeNull()
+    const [p0, p1] = absPoints(arrow)
+    const on = (shape: SceneElement, p: { x: number; y: number }) => {
+      const q = outlinePointToward(shape, p)
+      return Math.hypot(q.x - p.x, q.y - p.y) < 1e-6
+    }
+    expect(on(a, p0)).toBe(true)
+    expect(on(b, p1)).toBe(true)
+
+    st().applyStyle({ curve: 'elbow' })
+    st().applyStyle({ curve: 'curved' })
+    arrow = arrowOf()
+    expect(arrow.elbowed).toBe(false)
+    expect(arrow.points).toHaveLength(2)
+    expect(arrow.roundness).toEqual({ type: 2 })
+  })
+
+  it('round-trips Recto, Codo, Curvo, Codo, Recto with one undo entry per step', () => {
+    setup()
+    const start = absPoints(arrowOf())
+    const entries = st().history.stack.length
+    for (const curve of ['elbow', 'curved', 'elbow', 'sharp'] as const) st().applyStyle({ curve })
+    expect(st().history.stack.length).toBe(entries + 4)
+    const end = absPoints(arrowOf())
+    expect(end).toHaveLength(start.length)
+    end.forEach((p, i) => {
+      expect(p.x).toBeCloseTo(start[i].x, 6)
+      expect(p.y).toBeCloseTo(start[i].y, 6)
+    })
+    for (let i = 0; i < 4; i++) st().undo()
+    expect(st().history.stack.length).toBe(entries + 4)
+    expect(arrowOf().elbowed).toBe(false)
+    expect(absPoints(arrowOf())).toHaveLength(2)
+  })
+
+  it('treats elbow on a line as sharp and handles mixed selections', () => {
+    const { id } = setup()
+    const line = withAbsolutePoints(createLinear('line', 0, 200), [[0, 200], [80, 260]])
+    st().commitDraft({ ...line, roundness: { type: 2 } })
+    st().setSelection([id, line.id])
+    st().applyStyle({ curve: 'elbow' })
+    const l = live().find((e) => e.id === line.id) as LinearElement
+    expect(l.elbowed).not.toBe(true)
+    expect(l.roundness).toBeNull()
+    expect(arrowOf().elbowed).toBe(true)
+  })
+
+  it('routes a newly committed elbow arrow between two shapes', () => {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const a = rectAt(0, 0)
+    const b = rectAt(300, 40)
+    st().commitDraft(a)
+    st().commitDraft(b)
+    const draft = {
+      ...withAbsolutePoints(createLinear('arrow', 100, 25, styleForNew({ ...DEFAULT_STYLE_DEFAULTS, curve: 'elbow' }, 'arrow')), [[100, 25], [300, 65]]),
+    }
+    expect(draft.elbowed).toBe(true)
+    st().commitDraft(draft, { start: a.id, end: b.id })
+    const arrow = arrowOf()
+    expect(axisAligned(arrow)).toBe(true)
+    expect(arrow.points.length).toBeGreaterThan(2)
+    expect(arrow.roundness).toBeNull()
+    expect((arrow.startBinding as { elementId: string }).elementId).toBe(a.id)
+    expect((arrow.endBinding as { elementId: string }).elementId).toBe(b.id)
+  })
+
+  it('commits a multi-point elbow draft as a clean orthogonal route between its end points', () => {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const draft = {
+      ...withAbsolutePoints(createLinear('arrow', 0, 0, styleForNew({ ...DEFAULT_STYLE_DEFAULTS, curve: 'elbow' }, 'arrow')), [[0, 0], [50, 10], [60, 80], [200, 100]]),
+    }
+    st().commitDraft(draft)
+    const p = absPoints(arrowOf())
+    expect(axisAligned(arrowOf())).toBe(true)
+    expect(p[0]).toEqual({ x: 0, y: 0 })
+    expect(p[p.length - 1]).toEqual({ x: 200, y: 100 })
+    for (let i = 1; i < p.length; i++) expect(Math.abs(p[i].x - p[i - 1].x) + Math.abs(p[i].y - p[i - 1].y)).toBeGreaterThan(0)
+  })
+
+  it('undoes a newly committed elbow arrow in one step', () => {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const before = st().history.stack.length
+    const draft = withAbsolutePoints(createLinear('arrow', 0, 0, styleForNew({ ...DEFAULT_STYLE_DEFAULTS, curve: 'elbow' }, 'arrow')), [[0, 0], [200, 100]])
+    st().commitDraft(draft)
+    expect(st().history.stack.length).toBe(before + 1)
+    st().undo()
+    expect(live().filter((e) => e.type === 'arrow')).toHaveLength(0)
+  })
+
+  it('treats a zero-length elbow draft like a zero-length straight one', () => {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const straight = createLinear('arrow', 10, 10)
+    const elbow = { ...createLinear('arrow', 10, 10), elbowed: true }
+    st().commitDraft(elbow)
+    const a = arrowOf()
+    expect(a.points).toEqual(straight.points)
+    expect(Number.isFinite(a.x) && Number.isFinite(a.y)).toBe(true)
+  })
+
+  it('keeps a bound label attached and re-laid out when leaving elbow', () => {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const arrow = { ...withAbsolutePoints(createLinear('arrow', 0, 0), [[0, 0], [100, 0], [100, 80]]), elbowed: true } as LinearElement
+    const made = createLabel(arrow, 'hola')
+    st().load({
+      elements: [...attachLabel([arrow], made.container, made.label)],
+      appState: DEFAULT_APP_STATE,
+      files: {},
+      viewport: DEFAULT_VIEWPORT,
+    })
+    st().setSelection([arrow.id])
+    st().applyStyle({ curve: 'sharp' })
+    const a = arrowOf()
+    const label = live().find((e) => e.type === 'text')!
+    expect((label as { containerId: string | null }).containerId).toBe(arrow.id)
+    expect(a.boundElements).toContainEqual({ type: 'text', id: label.id })
+    expect(label.x + label.width / 2).toBeCloseTo(a.x + a.points[1][0] / 2, 0)
+    expect(label.y + label.height / 2).toBeCloseTo(a.y + a.points[1][1] / 2, 0)
   })
 })
