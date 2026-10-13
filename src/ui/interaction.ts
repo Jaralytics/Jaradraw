@@ -3,14 +3,15 @@ import type { DrawTool } from '../scene/store'
 import { clampZoom, screenToScene, zoomViewportAt } from '../scene/viewport'
 import { setLastPointerScene } from '../scene/pointer'
 import { createLinear, createShape, updateElement } from '../element/factory'
-import { findBindTarget, pointInsideElement } from '../element/bind'
+import { anchorArrowPreview, clickEndsArrow, findBindTarget, pointInsideElement } from '../element/bind'
 import { bindingTarget, expandWithLabels, rerouteElbowArrow } from '../element/relations'
 import { layoutLabel } from '../element/label'
 import { dedupePoints } from '../element/points'
 import { pinElbow } from '../element/elbowWaypoints'
 import { closestOnPolyline, dragElbow, editPolyline, elbowNodes } from '../element/elbowEdit'
 import type { EditEnds, ElbowTarget } from '../element/elbowEdit'
-import { getBoxCenter, getElementBounds, getElementBox, withAbsolutePoints } from '../element/geometry'
+import { MIN_CROP_PX, dragCropHandle, fullCrop, moveCropWindow, parseCrop, pointInCropWindow } from '../element/crop'
+import { getBoxCenter, getElementBounds, getElementBox, rotatePoint, withAbsolutePoints } from '../element/geometry'
 import { createFreedraw, appendFreedrawPoints, finishFreedraw } from '../element/freedraw'
 import { rotateElements, rotationDelta, selectionCenter } from '../element/transform'
 import { gridSettings, smartGuidesEnabled } from '../scene/serialize'
@@ -29,7 +30,7 @@ import {
 import type { SnapGuide, SnapIndex } from '../element/snap'
 import { styleForNew } from '../element/style'
 import { hitTestElement, hitTestScene } from '../element/hit'
-import { cursorForHandle, hitGroupHandle, hitGroupRotation, hitHandle } from '../element/handles'
+import { cursorForHandle, getHandlePositions, hitGroupHandle, hitGroupRotation, hitHandle } from '../element/handles'
 import type { HandleHit } from '../element/handles'
 import { createFrame } from '../element/frame'
 import { withFrameChildren } from '../element/frame'
@@ -45,10 +46,10 @@ import {
   selectionInRect,
 } from '../element/group'
 import { containerIdOf, isBoundText, isImage, isLinear, isRenderable, isShape, isText } from '../element/types'
-import type { Box, FreedrawElement, LinearElement, SceneElement } from '../element/types'
+import type { Box, FreedrawElement, ImageCrop, LinearElement, SceneElement } from '../element/types'
 import { isTypingTarget, targetOwnsKey } from './dom'
 import { dispatchShortcut } from './shortcuts'
-import { commitConnectedNodes } from '../scene/actions'
+import { commitConnectedNodes, toggleCrop } from '../scene/actions'
 import { DIRECTION_BY_KEY } from '../element/flowchart'
 
 type Vec = { x: number; y: number }
@@ -106,6 +107,15 @@ type Mode =
     }
   | { kind: 'resizingGroup'; originals: SceneElement[]; box: Box; dir: Dir; started: boolean }
   | { kind: 'rotating'; originals: SceneElement[]; center: Vec; start: Vec; base: number; started: boolean }
+  | {
+      kind: 'cropping'
+      /** Dragged handle, or null when the whole window slides over the image. */
+      dir: Dir | null
+      /** Handle position minus pointer position at the press, so the handle does not jump. */
+      grab: Vec
+      origin: Vec
+      start: ImageCrop
+    }
   | { kind: 'drawing'; draft: FreedrawElement }
   | { kind: 'erasing'; ids: Set<string>; last: Vec }
   | { kind: 'marquee'; origin: Vec; base: readonly string[] }
@@ -193,6 +203,9 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       case 'resizingGroup':
         cursor = dirCursor(mode.dir)
         break
+      case 'cropping':
+        cursor = mode.dir ? dirCursor(mode.dir) : 'move'
+        break
       case 'rotating':
         cursor = 'grabbing'
         break
@@ -210,7 +223,13 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
         else if (s.tool === 'text') cursor = 'text'
         else if (s.tool === 'eraser') cursor = ERASER_CURSOR
         else if (s.tool !== 'selection') cursor = 'crosshair'
-        else {
+        else if (s.cropping) {
+          const el = s.elements.find((x) => x.id === s.cropping?.id)
+          const p = toScene(last)
+          const handle = el ? hitHandle(el, p.x, p.y, s.viewport.zoom) : null
+          if (handle?.kind === 'box') cursor = dirCursor(handle.dir)
+          else if (el && isImage(el) && pointInCropWindow(el, p.x, p.y)) cursor = 'move'
+        } else {
           const p = toScene(last)
           const target = handleAt(p)
           if (target) {
@@ -315,6 +334,14 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
   function routePreview(arrow: LinearElement, override: { start?: string | null; end?: string | null }): LinearElement {
     if (arrow.elbowed !== true) return arrow
     return rerouteElbowArrow(arrow, (id) => st().elements.find((x) => x.id === id), override)
+  }
+
+  /** Preview of an arrow: elbow arrows are routed, the others get their anchored ends on the shape outlines. */
+  function arrowPreview(arrow: LinearElement, startTarget: string | null, p: Vec, endTarget: string | null): LinearElement {
+    const start = startFor(startTarget, p, endTarget)
+    if (arrow.elbowed === true) return routePreview(arrow, { start, end: endTarget })
+    const shape = (id: string | null) => (id ? st().elements.find((x) => x.id === id) : undefined)
+    return anchorArrowPreview(arrow, shape(start), shape(endTarget))
   }
 
   function endMode(): void {
@@ -490,6 +517,36 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     mode = { kind: 'marquee', origin: p, base }
   }
 
+  /** Crop mode press: starts a handle or window drag. Returns false when the press is outside the image (the crop is applied). */
+  function startCropGesture(e: PointerEvent, p: Vec): boolean {
+    const session = st().cropping
+    const el = session ? st().elements.find((x) => x.id === session.id) : undefined
+    if (!session || !el || !isImage(el)) {
+      st().applyCrop()
+      return false
+    }
+    const start = parseCrop(el.crop) ?? fullCrop(session.frame)
+    const handle = hitHandle(el, p.x, p.y, st().viewport.zoom)
+    let dir: Dir | null = null
+    let grab: Vec = { x: 0, y: 0 }
+    if (handle?.kind === 'box') {
+      dir = handle.dir
+      const pos = getHandlePositions(el, st().viewport.zoom).find((h) => h.handle.kind === 'box' && h.handle.dir === dir)
+      if (pos) grab = { x: pos.x - p.x, y: pos.y - p.y }
+    } else if (!pointInCropWindow(el, p.x, p.y)) {
+      const f = session.frame
+      const q = rotatePoint(p.x, p.y, f.center.x, f.center.y, -f.angle)
+      if (Math.abs(q.x - f.center.x) <= f.width / 2 && Math.abs(q.y - f.center.y) <= f.height / 2) return true
+      st().applyCrop()
+      return false
+    }
+    canvas.setPointerCapture(e.pointerId)
+    st().setGestureActive(true)
+    mode = { kind: 'cropping', dir, grab, origin: p, start }
+    updateCursor()
+    return true
+  }
+
   function onPointerDown(e: PointerEvent): void {
     if (e.button === 2) return
     if (mode.kind === 'idle') before = { selectedIds: st().selectedIds, tool: st().tool }
@@ -506,9 +563,19 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       const lastFixed = mode.fixed[mode.fixed.length - 1]
       if (Math.hypot(p.x - lastFixed.x, p.y - lastFixed.y) * st().viewport.zoom < 3) return
       const next = { ...mode, fixed: [...mode.fixed, p] }
+      const target = mode.tool === 'arrow' ? targetAt(p, e, mode.fixed[0]) : null
+      const before = mode.fixed.length
       mode = next
       // an elbow arrow always has exactly two points: the second click finishes it
-      if (next.base.elbowed === true) {
+      const endsOnShape = clickEndsArrow({
+        tool: next.tool,
+        elbowed: next.base.elbowed === true,
+        target,
+        startTarget: next.startTarget,
+        fixedCount: before,
+        noBind: noBind(e),
+      })
+      if (next.base.elbowed === true || endsOnShape) {
         finishPlacing(e)
         return
       }
@@ -518,7 +585,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     if (mode.kind !== 'idle') return
     activePointerId = e.pointerId
     activeButton = e.button
-    const state = st()
+    let state = st()
     const vp = state.viewport
 
     if (e.button === 1 || state.spaceHeld || state.tool === 'hand') {
@@ -529,6 +596,12 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       return
     }
     if (e.button !== 0) return
+
+    if (state.cropping && state.tool === 'selection') {
+      if (startCropGesture(e, toScene(s))) return
+      // a press outside the image applied the crop and goes on as a normal press
+      state = st()
+    }
 
     const p = toScene(s)
     canvas.setPointerCapture(e.pointerId)
@@ -583,7 +656,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
           ? createFrame(sp.x, sp.y)
           : createShape(tool, sp.x, sp.y, style)
     mode = { kind: 'creating', tool, origin: sp, originScreen: s, draft, startTarget }
-    state.setBindHighlight(startTarget)
+    state.setBindHighlight(null, startTarget)
     state.setSelection([])
     updateCursor()
   }
@@ -596,8 +669,8 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     if (mode.kind === 'placing') {
       const p = snapPoint(toScene(s), e)
       const endTarget = mode.tool === 'arrow' ? targetAt(p, e, mode.fixed[0]) : null
-      state.setDraft(routePreview(placingDraft(mode, p), { start: startFor(mode.startTarget, p, endTarget), end: endTarget }))
-      state.setBindHighlight(endTarget)
+      state.setDraft(arrowPreview(placingDraft(mode, p), mode.startTarget, p, endTarget))
+      state.setBindHighlight(endTarget, mode.startTarget)
       return
     }
     if (mode.kind !== 'idle' && e.pointerId !== activePointerId) return
@@ -619,9 +692,9 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
         const next = updateElement(mode.draft, creationPatch(mode.tool, mode.origin, p))
         mode = { ...mode, draft: next }
         const endTarget = arrow ? targetAt(p, e, mode.origin) : null
-        const linearDraft = isLinear(next) ? routePreview(next, { start: startFor(mode.startTarget, p, endTarget), end: endTarget }) : next
+        const linearDraft = isLinear(next) ? arrowPreview(next, mode.startTarget, p, endTarget) : next
         state.setDraft(linearDraft)
-        state.setBindHighlight(endTarget)
+        state.setBindHighlight(endTarget, mode.startTarget)
         state.setSnapGuides(
           objectSnapOn(e)
             ? edgeGuides(
@@ -780,6 +853,19 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
         state.replaceElements(rotateElements(mode.originals, mode.center, delta))
         break
       }
+      case 'cropping': {
+        const session = state.cropping
+        if (!session) break
+        const p = toScene(s)
+        const next = mode.dir
+          ? dragCropHandle(session.frame, mode.start, mode.dir, { x: p.x + mode.grab.x, y: p.y + mode.grab.y }, {
+              minSize: MIN_CROP_PX / state.viewport.zoom,
+              keepAspect: e.shiftKey,
+            })
+          : moveCropWindow(session.frame, mode.start, p.x - mode.origin.x, p.y - mode.origin.y)
+        state.updateCrop(next)
+        break
+      }
       case 'drawing': {
         const list = e.getCoalescedEvents?.() ?? []
         const pts = (list.length ? list : [e]).map((ev) => ({ ...toScene(toScreen(ev)), pressure: ev.pressure }))
@@ -842,6 +928,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     if (mode.kind === 'creating') state.setDraft(null)
     else if (mode.kind === 'drawing') state.setDraft(null)
     else if (mode.kind === 'erasing') state.setErasing([])
+    else if (mode.kind === 'cropping') state.updateCrop(mode.start)
     else if (
       mode.kind === 'dragging' ||
       mode.kind === 'resizing' ||
@@ -883,7 +970,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
           } else if (linear) {
             // a plain click starts a multi-point line: further clicks add points
             const m = mode
-            state.setBindHighlight(null)
+            state.setBindHighlight(null, m.startTarget)
             state.setSnapGuides([])
             candidateCache = null
             gesturePrior = null
@@ -975,7 +1062,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       return
     }
     const state = st()
-    if (state.tool !== 'selection' || state.textEditor) return
+    if (state.tool !== 'selection' || state.textEditor || state.cropping) return
     const p = toScene(toScreen(e))
     // a double click on a node handle deletes that node (the first click already made it the active one)
     const target = handleAt(p)
@@ -1011,6 +1098,11 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       if (group) {
         state.setEditingGroup(group)
         state.setSelection(selectionForClick(state.elements, hit.id, group))
+        return
+      }
+      if (isImage(hit)) {
+        state.setSelection([hit.id])
+        toggleCrop()
         return
       }
       if (isLinear(hit)) {
@@ -1071,6 +1163,14 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       const modifierOnly = e.key === 'Control' || e.key === 'Meta' || e.key === 'Shift' || e.key === 'Alt'
       const flowArrow = DIRECTION_BY_KEY[e.key.toLowerCase()] && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey
       if (!modifierOnly && !flowArrow) state.cancelFlowPreview()
+    }
+
+    if (state.cropping && mode.kind === 'idle' && (e.key === 'Enter' || e.key === 'Escape')) {
+      e.preventDefault()
+      if (e.key === 'Enter') state.applyCrop()
+      else state.cancelCrop()
+      updateCursor()
+      return
     }
 
     if (e.code === 'Space') {
@@ -1137,6 +1237,11 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
   }
 
   const unsubscribe = useStore.subscribe(() => {
+    const crop = st().cropping
+    if (crop && (st().tool !== 'selection' || st().selectedIds.length !== 1 || st().selectedIds[0] !== crop.id)) {
+      if (mode.kind === 'cropping') endMode()
+      st().applyCrop()
+    }
     if (mode.kind === 'placing' && st().tool !== mode.tool) {
       mode = { kind: 'idle' }
       st().setDraft(null)

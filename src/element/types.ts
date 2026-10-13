@@ -83,13 +83,23 @@ export interface FreedrawElement extends ElementBase {
   readonly lastCommittedPoint: Point | null
 }
 
+export interface ImageCrop {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+  readonly naturalWidth: number
+  readonly naturalHeight: number
+}
+
 export interface ImageElement extends ElementBase {
   readonly type: 'image'
   readonly fileId: string | null
   readonly status: string
   /** A negative component means the image is flipped on that axis. */
   readonly scale: readonly [number, number]
-  readonly crop: unknown
+  /** Visible region in pixels of the stored binary; null or absent means the whole image. */
+  readonly crop: ImageCrop | null
 }
 
 export interface FrameElement extends ElementBase {

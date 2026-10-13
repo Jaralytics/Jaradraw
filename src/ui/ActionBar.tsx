@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 import type { ReactNode } from 'react'
-import { useStore } from '../scene/store'
-import { isLinear, isRenderable } from '../element/types'
+import { croppableImage, useStore } from '../scene/store'
+import { isImage, isLinear, isRenderable } from '../element/types'
 import { selectionUnits } from '../element/group'
-import { AlignIcon, DeleteNodeIcon, FlipIcon, GroupIcon, LayerIcon, LockIcon } from './icons'
+import { AlignIcon, CropIcon, DeleteNodeIcon, FlipIcon, GroupIcon, LayerIcon, LockIcon } from './icons'
 import type { AlignIconKind } from './icons'
 import { DuplicateIcon, LibraryAddIcon, TrashIcon } from './iconsExtra'
 import { Popover } from './Popover'
@@ -12,9 +12,16 @@ import { tip } from './Tooltip'
 
 const labelOf = (id: string) => getShortcut(id).label
 
-function ActionButton({ id, children }: { id: string; children: ReactNode }) {
+function ActionButton({ id, children, pressed }: { id: string; children: ReactNode; pressed?: boolean }) {
   return (
-    <button type="button" className="icon-btn small" aria-label={labelOf(id)} {...tip(id)} onClick={() => runShortcut(id)}>
+    <button
+      type="button"
+      className="icon-btn small"
+      aria-label={labelOf(id)}
+      aria-pressed={pressed}
+      {...tip(id)}
+      onClick={() => runShortcut(id)}
+    >
       {children}
     </button>
   )
@@ -44,6 +51,9 @@ export function ActionBar() {
   const selectedIds = useStore((s) => s.selectedIds)
   const editing = useStore((s) => s.textEditor !== null)
   const pointEdit = useStore((s) => s.pointEdit)
+  const cropping = useStore((s) => s.cropping !== null)
+  const files = useStore((s) => s.files)
+  const tool = useStore((s) => s.tool)
   const selected = useMemo(() => {
     const ids = new Set(selectedIds)
     return elements.filter((e) => ids.has(e.id) && !e.isDeleted && isRenderable(e))
@@ -53,6 +63,15 @@ export function ActionBar() {
   const nodeActive = pointEdit !== null && (pointEdit.selected != null || pointEdit.waypoint !== undefined) && selected.length === 1 && selected[0].id === pointEdit.id && isLinear(selected[0])
 
   if (selected.length === 0 || editing) return null
+  if (cropping) {
+    return (
+      <div className="panel action-bar" role="toolbar" aria-label="Acciones">
+        <ActionButton id="edit.crop" pressed>
+          <CropIcon />
+        </ActionButton>
+      </div>
+    )
+  }
   if (selected.some((e) => e.locked)) {
     return (
       <div className="panel action-bar" role="toolbar" aria-label="Acciones">
@@ -63,6 +82,8 @@ export function ActionBar() {
     )
   }
   const grouped = selected.some((e) => e.groupIds.length > 0)
+  const image = croppableImage({ elements, selectedIds, files, tool })
+  const cropped = selected.length === 1 && isImage(selected[0]) && selected[0].crop != null
 
   return (
     <div className="panel action-bar" role="toolbar" aria-label="Acciones">
@@ -114,6 +135,16 @@ export function ActionBar() {
       <ActionButton id="edit.flipV">
         <FlipIcon vertical />
       </ActionButton>
+      {image && (
+        <ActionButton id="edit.crop" pressed={false}>
+          <CropIcon />
+        </ActionButton>
+      )}
+      {cropped && (
+        <ActionButton id="edit.cropReset">
+          <CropIcon off />
+        </ActionButton>
+      )}
       {units >= 2 && (
         <Popover label="Alinear" trigger={<AlignIcon kind="left" />}>
           {(close) => (

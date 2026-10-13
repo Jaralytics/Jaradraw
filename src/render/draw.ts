@@ -7,6 +7,7 @@ import { containerIdOf, isBoundText, isFrame, isFreedraw, isImage, isLinear, isR
 import { FRAME_NAME_SIZE, FRAME_RADIUS, frameLabel } from '../element/frame'
 import { transformColor } from './color'
 import { getDecodedImage } from './imageCache'
+import { cropSourceRect, parseCrop } from '../element/crop'
 import { freedrawOutline, outlineToPath } from '../element/freedraw'
 import type { Point } from '../element/types'
 import { getCurveSegments, isCurved, tangentSource } from '../element/path'
@@ -279,6 +280,12 @@ function drawImage(ctx: CanvasRenderingContext2D, el: ImageElement, opts: DrawOp
     ctx.translate(w / 2, h / 2)
     ctx.scale(sx < 0 ? -1 : 1, sy < 0 ? -1 : 1)
     ctx.translate(-w / 2, -h / 2)
+  }
+  const crop = parseCrop(el.crop)
+  if (crop) {
+    const { sx, sy, sw, sh } = cropSourceRect(crop, img.naturalWidth, img.naturalHeight)
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
+    return
   }
   ctx.drawImage(img, 0, 0, w, h)
 }

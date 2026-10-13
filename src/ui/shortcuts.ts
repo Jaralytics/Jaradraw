@@ -13,6 +13,7 @@ import {
   openFile,
   pickImages,
   saveFile,
+  toggleCrop,
   zoomBy,
   zoomIn,
   zoomOut,
@@ -269,6 +270,20 @@ export const SHORTCUTS: Shortcut[] = [
     run: () => st().flipSelection('vertical'),
   },
   {
+    id: 'edit.crop',
+    label: 'Recortar imagen',
+    category: 'Edición',
+    keys: [],
+    run: toggleCrop,
+  },
+  {
+    id: 'edit.cropReset',
+    label: 'Quitar recorte',
+    category: 'Edición',
+    keys: [],
+    run: () => st().clearCrop(),
+  },
+  {
     id: 'edit.alignLeft',
     label: 'Alinear a la izquierda',
     category: 'Edición',
@@ -496,7 +511,12 @@ export function matchesBinding(b: Binding, e: KeyboardEvent): boolean {
   return b.shift === undefined || b.shift === e.shiftKey
 }
 
+/** While a crop is being edited, only the crop button itself and the view shortcuts act. */
+const blockedWhileCropping = (id: string) => (id.startsWith('edit.') && id !== 'edit.crop') || id.startsWith('tool.')
+
 export function runShortcut(id: string): void {
+  if (st().cropping && blockedWhileCropping(id)) return
+  if (id.startsWith('file.')) st().applyCrop()
   getShortcut(id).run?.()
 }
 
@@ -505,6 +525,8 @@ export function dispatchShortcut(e: KeyboardEvent): boolean {
   for (const s of SHORTCUTS) {
     if (!s.run) continue
     if (s.keys.some((b) => matchesBinding(b, e))) {
+      if (st().cropping && blockedWhileCropping(s.id)) return false
+      if (s.id.startsWith('file.')) st().applyCrop()
       if (s.when && !s.when(e)) return false
       e.preventDefault()
       if (e.repeat && !REPEATABLE.has(s.id)) return true

@@ -38,6 +38,12 @@ export function getDecodedImage(fileId: string, dataURL: string | undefined): HT
   return entry.ready ? entry.img : null
 }
 
+/** Pixel size of a decoded image, or null while it is not ready. */
+export function getImageSize(fileId: string, dataURL: string | undefined): { width: number; height: number } | null {
+  const img = getDecodedImage(fileId, dataURL)
+  return img && img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null
+}
+
 /** Drops decoded images of files no element refers to any more. */
 export function pruneImages(referenced: ReadonlySet<string>): void {
   for (const id of cache.keys()) if (!referenced.has(id)) cache.delete(id)
