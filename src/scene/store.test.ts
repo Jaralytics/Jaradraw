@@ -212,10 +212,12 @@ describe('elbow path type', () => {
     expect(on(b, p1)).toBe(true)
 
     st().applyStyle({ curve: 'elbow' })
+    const corners = arrowOf().points.length
     st().applyStyle({ curve: 'curved' })
     arrow = arrowOf()
     expect(arrow.elbowed).toBe(false)
-    expect(arrow.points).toHaveLength(2)
+    expect(arrow.points).toHaveLength(corners)
+    expect(corners).toBeGreaterThan(2)
     expect(arrow.roundness).toEqual({ type: 2 })
   })
 

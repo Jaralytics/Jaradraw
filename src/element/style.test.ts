@@ -82,7 +82,7 @@ describe('curve option', () => {
     expect(line.roundness).toBeNull()
   })
 
-  it('collapses an elbow arrow to a straight one when switching away', () => {
+  it('collapses an elbow arrow when switching to sharp and keeps its corners when switching to curved', () => {
     const e = arrow({ elbowed: true })
     const sharp = applyStyleToElement(e, { curve: 'sharp' }) as LinearElement
     expect(sharp.elbowed).toBe(false)
@@ -90,7 +90,8 @@ describe('curve option', () => {
     expect(sharp.width).toBe(100)
     expect(sharp.height).toBe(60)
     const curved = applyStyleToElement(e, { curve: 'curved' }) as LinearElement
-    expect(curved.points).toHaveLength(2)
+    expect(curved.elbowed).toBe(false)
+    expect(curved.points).toEqual(e.points)
     expect(curved.roundness).toEqual({ type: 2 })
   })
 

@@ -74,15 +74,17 @@ function curvePatch(el: LinearElement, curve: Curve): Record<string, unknown> {
   if (curve === 'elbow' && el.type === 'arrow') return el.elbowed === true ? {} : { elbowed: true, roundness: null }
   const patch: Record<string, unknown> = { roundness: roundnessFor(el.type, curve === 'curved' ? 'round' : 'sharp') }
   if (el.elbowed === true) {
-    // leaving elbow collapses the route to a straight arrow, which reconcile re-snaps to its shapes
-    const last = el.points[el.points.length - 1]
     patch.elbowed = false
     patch.fixedSegments = null
     patch.startIsSpecial = null
     patch.endIsSpecial = null
-    patch.points = [el.points[0], last]
-    patch.width = Math.abs(last[0] - el.points[0][0])
-    patch.height = Math.abs(last[1] - el.points[0][1])
+    // a curve keeps the corners as its control points; a straight arrow collapses to its two ends
+    if (curve !== 'curved') {
+      const last = el.points[el.points.length - 1]
+      patch.points = [el.points[0], last]
+      patch.width = Math.abs(last[0] - el.points[0][0])
+      patch.height = Math.abs(last[1] - el.points[0][1])
+    }
   }
   return patch
 }
