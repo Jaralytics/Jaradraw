@@ -1,0 +1,60 @@
+import { describe, expect, it } from 'vitest'
+import { createShape, createText } from './factory'
+import { applyStyleToElement, cornerRadius, roundnessFor, styleForNew, DEFAULT_STYLE_DEFAULTS } from './style'
+import { parseScene } from '../scene/serialize'
+
+describe('roundness', () => {
+  it('maps edges to excalidraw roundness per type', () => {
+    expect(roundnessFor('rectangle', 'round')).toEqual({ type: 3 })
+    expect(roundnessFor('diamond', 'round')).toEqual({ type: 2 })
+    expect(roundnessFor('arrow', 'round')).toEqual({ type: 2 })
+    expect(roundnessFor('rectangle', 'sharp')).toBeNull()
+    expect(roundnessFor('ellipse', 'round')).toBeUndefined()
+    expect(roundnessFor('text', 'round')).toBeUndefined()
+  })
+
+  it('computes corner radius for adaptive and proportional roundness', () => {
+    expect(cornerRadius({ roundness: null, width: 100, height: 100 })).toBe(0)
+    expect(cornerRadius({ roundness: { type: 3 }, width: 100, height: 40 })).toBe(10)
+    expect(cornerRadius({ roundness: { type: 3 }, width: 400, height: 400 })).toBe(32)
+    expect(cornerRadius({ roundness: { type: 2 }, width: 100, height: 80 })).toBe(20)
+    expect(cornerRadius({ roundness: { type: 3, value: 8 }, width: 100, height: 80 })).toBe(8)
+  })
+
+  it('parses roundness from files and repairs invalid values', () => {
+    const p = parseScene({
+      elements: [
+        { id: 'a', type: 'rectangle', roundness: { type: 3 } },
+        { id: 'b', type: 'diamond', roundness: { type: 2, value: 0.3 } },
+        { id: 'c', type: 'rectangle', roundness: 'round' },
+        { id: 'd', type: 'rectangle' },
+      ],
+    })!
+    const r = p.elements as unknown as { roundness: unknown }[]
+    expect(r[0].roundness).toEqual({ type: 3 })
+    expect(r[1].roundness).toEqual({ type: 2, value: 0.3 })
+    expect(r[2].roundness).toBeNull()
+    expect(r[3].roundness).toBeNull()
+  })
+})
+
+describe('style application', () => {
+  it('applies only relevant props per element type', () => {
+    const rect = createShape('rectangle', 0, 0)
+    const text = createText(0, 0, 'a', { width: 5, height: 5 })
+    const patch = { backgroundColor: '#ffc9c9', strokeWidth: 4, opacity: 50, edges: 'round' as const }
+    const r = applyStyleToElement(rect, patch)
+    expect(r).toMatchObject({ backgroundColor: '#ffc9c9', strokeWidth: 4, opacity: 50, roundness: { type: 3 } })
+    expect(r.version).toBe(rect.version + 1)
+    const t = applyStyleToElement(text, patch)
+    expect(t).toMatchObject({ opacity: 50, strokeWidth: 2, backgroundColor: 'transparent', roundness: null })
+    expect(applyStyleToElement(text, { backgroundColor: '#fff' })).toBe(text)
+  })
+
+  it('builds creation style from defaults', () => {
+    const s = styleForNew({ ...DEFAULT_STYLE_DEFAULTS, edges: 'round', strokeWidth: 4 }, 'rectangle')
+    expect(s).toMatchObject({ strokeWidth: 4, roundness: { type: 3 } })
+    expect('edges' in s).toBe(false)
+    expect('roundness' in styleForNew({ ...DEFAULT_STYLE_DEFAULTS, edges: 'round' }, 'ellipse')).toBe(false)
+  })
+})
