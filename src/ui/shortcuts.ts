@@ -8,6 +8,7 @@ import {
   editSelected,
   goToConnectedNode,
   hasSelectedNode,
+  newFile,
   openExportDialog,
   openFile,
   pickImages,
@@ -362,6 +363,7 @@ export const SHORTCUTS: Shortcut[] = [
   },
   { id: 'view.cancel', label: 'Cancelar o deseleccionar', category: 'Vista', keys: [{ key: 'escape', display: 'Esc' }] },
 
+  { id: 'file.new', label: 'Nuevo', category: 'Archivo', keys: [], run: newFile },
   {
     id: 'file.open',
     label: 'Abrir',

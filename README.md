@@ -120,6 +120,7 @@ En macOS, Ctrl equivale a Cmd.
 | Vista | Mover el lienzo | Espacio + arrastrar, rueda |
 | Vista | Atajos de teclado | ? |
 | Vista | Cancelar o deseleccionar | Esc |
+| Archivo | Nuevo (empieza un boceto vacío, con confirmación si hay dibujo) | solo menú |
 | Archivo | Abrir | Ctrl+O |
 | Archivo | Guardar, Guardar como | Ctrl+S, Ctrl+Alt+S |
 | Archivo | Exportar imagen (PNG o SVG) | Mayús+E |

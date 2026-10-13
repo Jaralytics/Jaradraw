@@ -307,6 +307,15 @@ export function loadTemplate(id: string): void {
   )
 }
 
+/** Starts an empty drawing with no file identity; grid and background settings are kept. */
+export function newFile(): void {
+  confirmReplace(() => replaceScene({ elements: [], appState: st().appState, files: {} }, null, null), {
+    title: 'Nuevo boceto',
+    message: 'El dibujo actual se borrará para empezar uno nuevo. Esta acción no se puede deshacer.',
+    confirmLabel: 'Empezar de cero',
+  })
+}
+
 export async function openFile(): Promise<void> {
   try {
     const result = await pickAndReadFile()

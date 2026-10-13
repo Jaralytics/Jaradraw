@@ -12,7 +12,7 @@ const THEMES: { value: ThemePref; label: string }[] = [
   { value: 'system', label: 'Tema del sistema' },
 ]
 
-const ITEMS = ['file.open', 'file.save', 'file.saveAs', 'file.export']
+const ITEMS = ['file.new', 'file.open', 'file.save', 'file.saveAs', 'file.export']
 
 export function FileMenu() {
   const [open, setOpen] = useState(false)
