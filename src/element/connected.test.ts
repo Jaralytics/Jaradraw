@@ -10,11 +10,17 @@ import { parseClipboard, serializeClipboard } from '../scene/clipboard'
 import { cloneElements } from './clone'
 import { normalizeArrowhead } from './arrowhead'
 import { insertMidpoint, removePoint } from './points'
-import { withAbsolutePoints, getElementBox } from './geometry'
+import { withAbsolutePoints, getElementBox, getBoxCenter, rotatePoint } from './geometry'
 import { hitTestElement } from './hit'
 import { moveElement } from './resize'
 import { bezierAt, getCurveSegments } from './path'
 import { updateElement } from './factory'
+import { recomputeArrow, rerouteElbowArrow } from './relations'
+import { sideAnchor } from './elbow'
+import type { Heading } from './elbow'
+import { BIND_GAP } from './bind'
+import { createHistory, currentEntry, pushHistory, undoHistory } from '../scene/history'
+import { parseScene, serializeScene } from '../scene/serialize'
 
 const rect = (x: number, y: number, w: number, h: number, type: 'rectangle' | 'ellipse' | 'diamond' = 'rectangle') => ({
   ...createShape(type, x, y),
@@ -333,5 +339,255 @@ describe('review fixes (phase 3)', () => {
     expect(wrapText('  a  b', 500, 20, 2)).toBe('  a  b')
     expect(wrapText('a\n   \nb', 500, 20, 2)).toBe('a\n   \nb')
     expect(wrapText('abc def', 1, 20, 2).split('\n')).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+  })
+})
+
+describe('elbow arrows in reconcile', () => {
+  type Spec = 'rectangle' | 'ellipse' | 'diamond'
+  const setup = (aType: Spec = 'rectangle', bType: Spec = 'rectangle', ax = 0, ay = 0, bx = 300, by = 40) => {
+    const a = rect(ax, ay, 100, 50, aType)
+    const b = rect(bx, by, 100, 50, bType)
+    const arrow = {
+      ...withAbsolutePoints(createLinear('arrow', 100, 25), [[100, 25], [300, 65]]),
+      elbowed: true,
+    } as LinearElement
+    let els: readonly SceneElement[] = [a, b, arrow]
+    els = bindArrowEnd(els, arrow.id, 'start', a.id)
+    els = bindArrowEnd(els, arrow.id, 'end', b.id)
+    const out = reconcile([], els)
+    return { a, b, id: arrow.id, out }
+  }
+  const arrowOf = (els: readonly SceneElement[], id: string) => els.find((e) => e.id === id) as LinearElement
+  const abs = (a: LinearElement) => a.points.map(([x, y]) => ({ x: a.x + x, y: a.y + y }))
+  const patchOf = (els: readonly SceneElement[], id: string, patch: Record<string, unknown>) =>
+    els.map((e) => (e.id === id ? updateElement(e, patch as never) : e))
+  const lookupIn = (els: readonly SceneElement[]) => (id: string) => els.find((e) => e.id === id)
+  const headings: Heading[] = ['right', 'down', 'left', 'up']
+
+  function expectRouted(els: readonly SceneElement[], id: string) {
+    const arrow = arrowOf(els, id)
+    const pts = abs(arrow)
+    for (let i = 1; i < pts.length; i++) {
+      expect(Math.abs(pts[i].x - pts[i - 1].x) < 1e-6 || Math.abs(pts[i].y - pts[i - 1].y) < 1e-6).toBe(true)
+    }
+    const ends = [
+      ['startBinding', pts[0]],
+      ['endBinding', pts[pts.length - 1]],
+    ] as const
+    for (const [key, p] of ends) {
+      const b = arrow[key] as { elementId: string; fixedPoint: [number, number] }
+      const shape = els.find((e) => e.id === b.elementId)!
+      const on = outlinePointToward(shape, p, BIND_GAP)
+      expect(on.x).toBeCloseTo(p.x, 5)
+      expect(on.y).toBeCloseTo(p.y, 5)
+      for (const v of b.fixedPoint) {
+        expect(v).toBeGreaterThanOrEqual(0)
+        expect(v).toBeLessThanOrEqual(1)
+      }
+    }
+    expect(arrow.angle).toBe(0)
+    expect(arrow.roundness).toBeNull()
+    expect(arrow.fixedSegments).toBeNull()
+  }
+
+  it('re-routes when a bound shape moves, resizes or rotates', () => {
+    for (const [at, bt] of [['rectangle', 'rectangle'], ['ellipse', 'diamond'], ['diamond', 'ellipse']] as const) {
+      const { b, id, out } = setup(at, bt)
+      expectRouted(out, id)
+      const changes = [{ x: b.x + 40, y: b.y + 130 }, { width: 160, height: 90 }, { angle: Math.PI / 5 }]
+      for (const change of changes) {
+        const next = reconcile(out, patchOf(out, b.id, change))
+        expect(arrowOf(next, id)).not.toBe(arrowOf(out, id))
+        expectRouted(next, id)
+      }
+    }
+  })
+
+  it('changes sides when the relative position changes', () => {
+    const { b, id, out } = setup('rectangle', 'rectangle', 0, 0, 300, 0)
+    const before = abs(arrowOf(out, id))
+    expect(before[0].x).toBeCloseTo(104)
+    expect(before[before.length - 1].x).toBeCloseTo(296)
+    const next = reconcile(out, patchOf(out, b.id, { x: 0, y: 300 }))
+    const after = abs(arrowOf(next, id))
+    expect(after[0].y).toBeCloseTo(54)
+    expect(after[after.length - 1].y).toBeCloseTo(296)
+    expect(after[0].x).toBeCloseTo(50)
+  })
+
+  it('anchors on rotated diamonds and ellipses coincide with the side anchors', () => {
+    for (const type of ['diamond', 'ellipse'] as const) {
+      const { a, b, id, out } = setup(type, type)
+      const rotated = patchOf(patchOf(out, a.id, { angle: 0.6 }), b.id, { angle: -0.4 })
+      const arrow = rerouteElbowArrow(arrowOf(rotated, id), lookupIn(rotated))
+      const pts = abs(arrow)
+      const last = pts[pts.length - 1]
+      const hit = (shape: SceneElement, p: { x: number; y: number }) =>
+        headings.some((h) => {
+          const s = sideAnchor(shape, h, BIND_GAP)
+          return Math.abs(s.x - p.x) < 1e-6 && Math.abs(s.y - p.y) < 1e-6
+        })
+      expect(hit(rotated[0], pts[0])).toBe(true)
+      expect(hit(rotated[1], last)).toBe(true)
+    }
+  })
+
+  it('is idempotent and leaves untouched arrows alone', () => {
+    const { id, out } = setup()
+    const arrow = arrowOf(out, id)
+    expect(rerouteElbowArrow(arrow, lookupIn(out))).toBe(arrow)
+    expect(recomputeArrow(arrow, lookupIn(out))).toBe(arrow)
+    const other = rect(900, 900, 50, 50)
+    const base = [...out, other]
+    const next = reconcile(base, patchOf(base, other.id, { x: 950 }))
+    expect(arrowOf(next, id)).toBe(arrow)
+  })
+
+  it('restores the exact previous points on undo', () => {
+    const { b, id, out } = setup()
+    const h = pushHistory(createHistory(out), reconcile(out, patchOf(out, b.id, { x: 500, y: 200 })))
+    expect(arrowOf(currentEntry(h), id).points).not.toEqual(arrowOf(out, id).points)
+    const undone = currentEntry(undoHistory(h))
+    expect(arrowOf(undone, id)).toBe(arrowOf(out, id))
+  })
+
+  it('keeps imported elbow arrows untouched until one of their shapes moves', () => {
+    const { a, b, id, out } = setup()
+    const imported = out.map((e) =>
+      e.id === id
+        ? ({
+            ...e,
+            points: [[0, 0], [150, 20], [200, 40]],
+            fixedSegments: [{ index: 1, start: [1, 1], end: [2, 2] }],
+            startBinding: { elementId: a.id, focus: 0.1, gap: 4, fixedPoint: [0.9, 0.5], extra: 'keep' },
+            endBinding: { elementId: b.id, focus: 0, gap: 4, fixedPoint: null, extra: 'keep' },
+          } as LinearElement)
+        : e,
+    )
+    const parsed = parseScene(JSON.parse(JSON.stringify(serializeScene(imported))))!.elements
+    const arrow = arrowOf(parsed, id)
+    const other = rect(900, 900, 50, 50)
+    const base = [...parsed, other]
+    const same = reconcile(base, patchOf(base, other.id, { x: 950 }))
+    expect(arrowOf(same, id)).toBe(arrow)
+    expect(arrow.fixedSegments).not.toBeNull()
+    const moved = reconcile(parsed, patchOf(parsed, b.id, { y: b.y + 100 }))
+    const r = arrowOf(moved, id)
+    expect(r.fixedSegments).toBeNull()
+    expect(r.endBinding).toMatchObject({ elementId: b.id, extra: 'keep' })
+    expect(r.startBinding).toMatchObject({ elementId: a.id, extra: 'keep' })
+    expectRouted(moved, id)
+  })
+
+  it('keeps unbound elbow arrows rigid when translated and orthogonal when an end moves', () => {
+    const free = {
+      ...withAbsolutePoints(createLinear('arrow', 0, 0), [[0, 0], [60, 0], [60, 80]]),
+      elbowed: true,
+    } as LinearElement
+    const scene = reconcile([], [free])
+    const translated = reconcile(scene, patchOf(scene, free.id, { x: 200, y: 100 }))
+    expect(arrowOf(translated, free.id).points).toEqual(free.points)
+    const stretched = reconcile(scene, patchOf(scene, free.id, { points: [[0, 0], [60, 0], [120, 90]] }))
+    const pts = abs(arrowOf(stretched, free.id))
+    for (let i = 1; i < pts.length; i++) expect(pts[i].x === pts[i - 1].x || pts[i].y === pts[i - 1].y).toBe(true)
+  })
+
+  it('re-routes when the elbowed flag is turned on and leaves plain arrows as before', () => {
+    const { id, out } = setup()
+    const plain = patchOf(out, id, { elbowed: false })
+    const back = reconcile(plain, patchOf(plain, id, { elbowed: true }))
+    expectRouted(back, id)
+    const a = rect(0, 0, 100, 50)
+    const b = rect(300, 40, 100, 50)
+    const line = withAbsolutePoints(createLinear('arrow', 100, 25), [[100, 25], [300, 65]])
+    const els = bindArrowEnd(bindArrowEnd([a, b, line], line.id, 'start', a.id), line.id, 'end', b.id)
+    const arrow = els[2] as LinearElement
+    expect(recomputeArrow(arrow, lookupIn(els)).points).toEqual(recomputeBoundEnds(arrow, lookupIn(els)).points)
+  })
+
+  it('re-routes with a free end when its bound shape is deleted', () => {
+    const { b, id, out } = setup()
+    const oldEnd = abs(arrowOf(out, id)).at(-1)!
+    const next = reconcile(out, patchOf(out, b.id, { isDeleted: true }))
+    const arrow = arrowOf(next, id)
+    expect(arrow.endBinding).toBeNull()
+    const pts = abs(arrow)
+    expect(pts[pts.length - 1].x).toBeCloseTo(oldEnd.x)
+    expect(pts[pts.length - 1].y).toBeCloseTo(oldEnd.y)
+    for (let i = 1; i < pts.length; i++) expect(pts[i].x === pts[i - 1].x || pts[i].y === pts[i - 1].y).toBe(true)
+  })
+
+  it('re-routes with a free end when the binding is removed', () => {
+    const { id, out } = setup()
+    const oldEnd = abs(arrowOf(out, id)).at(-1)!
+    const next = reconcile(out, patchOf(out, id, { endBinding: null }))
+    const pts = abs(arrowOf(next, id))
+    expect(arrowOf(next, id).endBinding).toBeNull()
+    expect(pts[pts.length - 1].x).toBeCloseTo(oldEnd.x)
+    expect(pts[pts.length - 1].y).toBeCloseTo(oldEnd.y)
+    for (let i = 1; i < pts.length; i++) expect(pts[i].x === pts[i - 1].x || pts[i].y === pts[i - 1].y).toBe(true)
+  })
+
+  it('translates arrow and shapes together without double translation', () => {
+    const { id, out } = setup()
+    const before = abs(arrowOf(out, id))
+    const next = reconcile(out, out.map((e) => updateElement(e, { x: e.x + 70, y: e.y - 30 } as never)))
+    const after = abs(arrowOf(next, id))
+    expect(after).toHaveLength(before.length)
+    after.forEach((p, i) => {
+      expect(p.x).toBeCloseTo(before[i].x + 70)
+      expect(p.y).toBeCloseTo(before[i].y - 30)
+    })
+  })
+
+  it('routes an arrow bound to the same shape at both ends', () => {
+    const a = rect(0, 0, 100, 50)
+    const arrow = {
+      ...withAbsolutePoints(createLinear('arrow', 100, 25), [[100, 25], [100, 25.5]]),
+      elbowed: true,
+      startBinding: { elementId: a.id },
+      endBinding: { elementId: a.id },
+    } as LinearElement
+    const r = rerouteElbowArrow(arrow, lookupIn([a, arrow]))
+    const pts = abs(r)
+    expect(pts.length).toBeGreaterThanOrEqual(2)
+    for (const p of pts) expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true)
+    for (let i = 1; i < pts.length; i++) {
+      expect(pts[i].x === pts[i - 1].x || pts[i].y === pts[i - 1].y).toBe(true)
+      expect(Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)).toBeGreaterThan(0)
+    }
+  })
+
+  it('routes between overlapping shapes', () => {
+    const { id, out } = setup('rectangle', 'rectangle', 0, 0, 50, 20)
+    const pts = abs(arrowOf(out, id))
+    for (const p of pts) expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true)
+    expect(pts.length).toBeGreaterThanOrEqual(2)
+    expectRouted(out, id)
+  })
+
+  it('is idempotent on rotated diamonds and ellipses', () => {
+    for (const type of ['diamond', 'ellipse'] as const) {
+      const { a, b, id, out } = setup(type, type)
+      const rotated = patchOf(patchOf(out, a.id, { angle: 0.6 }), b.id, { angle: -0.4 })
+      const first = rerouteElbowArrow(arrowOf(rotated, id), lookupIn(rotated))
+      expect(rerouteElbowArrow(first, lookupIn(rotated))).toBe(first)
+    }
+  })
+
+  it('re-routes an imported arrow with a non-zero angle from its baked points', () => {
+    const base = withAbsolutePoints(createLinear('arrow', 0, 0), [[0, 0], [60, 0], [60, 80]])
+    const arrow = { ...base, elbowed: true, angle: 0.5 } as LinearElement
+    const c = getBoxCenter(getElementBox(arrow))
+    const start = rotatePoint(0, 0, c.x, c.y, 0.5)
+    const end = rotatePoint(60, 80, c.x, c.y, 0.5)
+    const r = rerouteElbowArrow(arrow, () => undefined)
+    const pts = abs(r)
+    expect(r.angle).toBe(0)
+    expect(pts[0].x).toBeCloseTo(start.x)
+    expect(pts[0].y).toBeCloseTo(start.y)
+    expect(pts[pts.length - 1].x).toBeCloseTo(end.x)
+    expect(pts[pts.length - 1].y).toBeCloseTo(end.y)
+    for (let i = 1; i < pts.length; i++) expect(pts[i].x === pts[i - 1].x || pts[i].y === pts[i - 1].y).toBe(true)
   })
 })

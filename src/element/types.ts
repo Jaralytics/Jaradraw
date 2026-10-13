@@ -37,6 +37,15 @@ export interface ShapeElement extends ElementBase {
   readonly type: 'rectangle' | 'ellipse' | 'diamond'
 }
 
+/** Shape of an arrow binding when read; extra fields written by other tools are kept untouched. */
+export interface Binding {
+  readonly elementId: string
+  readonly focus?: number
+  readonly gap?: number
+  readonly fixedPoint?: readonly [number, number] | null
+  readonly [key: string]: unknown
+}
+
 export interface LinearElement extends ElementBase {
   readonly type: 'line' | 'arrow'
   readonly points: readonly Point[]
@@ -46,6 +55,9 @@ export interface LinearElement extends ElementBase {
   readonly startArrowhead: string | null
   readonly endArrowhead: string | null
   readonly elbowed?: boolean
+  readonly fixedSegments?: unknown
+  readonly startIsSpecial?: boolean | null
+  readonly endIsSpecial?: boolean | null
 }
 
 export interface TextElement extends ElementBase {

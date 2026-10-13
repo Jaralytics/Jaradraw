@@ -1,10 +1,12 @@
-import type { LinearElement, Point, SceneElement, TextElement } from './types'
+import type { Binding, LinearElement, Point, SceneElement, TextElement } from './types'
 import { containerIdOf, isBoundText, isLinear, isText } from './types'
 import { updateElement } from './factory'
-import { getAbsolutePoints, getBoxCenter, getElementBox, withAbsolutePoints } from './geometry'
+import { bakeAngle, getAbsolutePoints, getBoxCenter, getElementBounds, getElementBox, rotatePoint, withAbsolutePoints } from './geometry'
 import type { Vec } from './geometry'
 import { BIND_GAP, isBindTarget, outlinePointToward, pointInsideElement } from './bind'
 import { layoutLabel } from './label'
+import { routeElbow, sideAnchor } from './elbow'
+import type { ElbowEnd, Heading } from './elbow'
 
 export interface BoundRef {
   type: string
@@ -16,6 +18,8 @@ const BINDING_KEY = { start: 'startBinding', end: 'endBinding' } as const
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
+
+const isBinding = (b: unknown): b is Binding => isObject(b) && typeof b.elementId === 'string'
 
 export function getBoundRefs(el: SceneElement): BoundRef[] {
   if (!Array.isArray(el.boundElements)) return []
@@ -225,6 +229,128 @@ export function recomputeBoundEnds(
   return { ...withAbsolutePoints(arrow, abs), ...patch } as LinearElement
 }
 
+const near = (a: number, b: number) => Math.abs(a - b) < EPS
+
+/** Anchor normalised in the shape's unrotated box, clamped to 0..1; exactly 0.5 is nudged as Excalidraw does. */
+function fixedPointOf(shape: SceneElement, p: Vec): [number, number] {
+  const box = getElementBox(shape)
+  const c = getBoxCenter(box)
+  const l = shape.angle === 0 ? p : rotatePoint(p.x, p.y, c.x, c.y, -shape.angle)
+  const norm = (v: number, size: number) => {
+    // the clamp is deliberate: the anchor sits `gap` px outside the box
+    const n = size > EPS ? Math.min(1, Math.max(0, v / size)) : 0.5
+    return Math.abs(n - 0.5) < 1e-9 ? 0.5001 : n
+  }
+  return [norm(l.x - box.x, box.width), norm(l.y - box.y, box.height)]
+}
+
+/**
+ * Routes an elbow arrow between its bound shapes (or its current free endpoints) as orthogonal
+ * segments. `override` replaces the shape an end is bound to; null forces a free end. Returns the
+ * same object when nothing changes.
+ */
+export function rerouteElbowArrow(
+  arrow: LinearElement,
+  lookup: (id: string) => SceneElement | undefined,
+  override?: { start?: string | null; end?: string | null },
+): LinearElement {
+  const base = bakeAngle(arrow)
+  const src = getAbsolutePoints(base)
+  if (src.length === 0) return arrow
+  const shapeFor = (end: ArrowEnd) => {
+    const id = override && override[end] !== undefined ? override[end] : bindingTarget(arrow[BINDING_KEY[end]])
+    const el = id ? lookup(id) : undefined
+    return el && isBindTarget(el) ? el : undefined
+  }
+  const sShape = shapeFor('start')
+  const eShape = shapeFor('end')
+  if (!sShape && !eShape && src.length < 2) return arrow
+  const first = src[0]
+  const last = src[src.length - 1]
+  const endOf = (shape: SceneElement | undefined, p: Point): ElbowEnd => ({
+    point: { x: p[0], y: p[1] },
+    box: shape ? getElementBounds(shape) : null,
+  })
+  const route = routeElbow(endOf(sShape, first), endOf(eShape, last))
+  const pts: Vec[] = route.points.map((p) => ({ ...p }))
+  // a degenerate route (coincident or non-finite points) is never written
+  if (pts.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)) || pts.every((p) => near(p.x, pts[0].x) && near(p.y, pts[0].y))) {
+    return arrow
+  }
+  const patch: Record<string, unknown> = {
+    roundness: null,
+    angle: 0,
+    fixedSegments: null,
+    startIsSpecial: null,
+    endIsSpecial: null,
+  }
+  let bindingsSame = true
+  const anchorEnd = (end: ArrowEnd, shape: SceneElement, h: Heading, index: number) => {
+    const prev = arrow[BINDING_KEY[end]]
+    const pb = isBinding(prev) ? prev : null
+    const gap = typeof pb?.gap === 'number' ? pb.gap : BIND_GAP
+    const a = sideAnchor(shape, h, gap)
+    // only the coordinate along the heading moves, so the route stays axis-aligned
+    const p = pts[index]
+    pts[index] = h === 'left' || h === 'right' ? { x: a.x, y: p.y } : { x: p.x, y: a.y }
+    const fixedPoint = fixedPointOf(shape, pts[index])
+    const old = pb?.fixedPoint
+    const same =
+      !!pb && pb.elementId === shape.id && !!old && near(old[0], fixedPoint[0]) && near(old[1], fixedPoint[1])
+    if (!same) bindingsSame = false
+    const focus = typeof pb?.focus === 'number' ? pb.focus : 0
+    patch[BINDING_KEY[end]] = same ? prev : { ...pb, elementId: shape.id, focus, gap, fixedPoint }
+  }
+  if (sShape) anchorEnd('start', sShape, route.startHeading, 0)
+  if (eShape) anchorEnd('end', eShape, route.endHeading, pts.length - 1)
+
+  const same =
+    bindingsSame &&
+    base === arrow &&
+    arrow.roundness === null &&
+    (arrow.fixedSegments ?? null) === null &&
+    (arrow.startIsSpecial ?? null) === null &&
+    (arrow.endIsSpecial ?? null) === null &&
+    pts.length === src.length &&
+    pts.every((p, i) => near(p.x, src[i][0]) && near(p.y, src[i][1]))
+  if (same) return arrow
+  return { ...withAbsolutePoints(base, pts.map((p) => [p.x, p.y] as Point)), ...patch } as LinearElement
+}
+
+/** Recomputes an arrow after its shapes or itself changed: elbow arrows are re-routed, others re-snapped. */
+export function recomputeArrow(
+  arrow: LinearElement,
+  lookup: (id: string) => SceneElement | undefined,
+  placing?: ArrowEnd,
+): LinearElement {
+  return arrow.elbowed === true ? rerouteElbowArrow(arrow, lookup) : recomputeBoundEnds(arrow, lookup, placing)
+}
+
+function sameValues(a: readonly Point[], b: readonly Point[]): boolean {
+  return a.length === b.length && a.every((p, i) => near(p[0], b[i][0]) && near(p[1], b[i][1]))
+}
+
+/** Own-change trigger for an arrow in reconcile; unbound elbow arrows keep their shape when merely moved. */
+function arrowNeedsRecompute(
+  was: SceneElement | undefined,
+  el: LinearElement,
+  live: (id: string) => SceneElement | undefined,
+): boolean {
+  const elbow = el.elbowed === true
+  if (!was) return !elbow
+  if (!isLinear(was)) return true
+  if ((was.elbowed === true) !== elbow) return true
+  if (bindingsChanged(was, el)) return true
+  if (!geometryChanged(was, el)) return false
+  if (!elbow) return true
+  const bound = (['start', 'end'] as const).some((end) => {
+    const t = bindingTarget(el[BINDING_KEY[end]])
+    const s = t ? live(t) : undefined
+    return !!s && isBindTarget(s)
+  })
+  return bound || el.angle !== was.angle || !sameValues(was.points, el.points)
+}
+
 function labelOf(container: SceneElement, cur: Map<string, SceneElement>): TextElement | undefined {
   for (const r of getBoundRefs(container)) {
     const t = cur.get(r.id)
@@ -251,6 +377,7 @@ export function reconcile(prev: readonly SceneElement[], next: readonly SceneEle
   }
 
   // 1. Deletion cascade: labels go with their container, bindings and back-references are cleared
+  const cleared = new Set<string>()
   const cascade = (el: SceneElement) => {
     for (const r of getBoundRefs(el)) {
       const t = cur.get(r.id)
@@ -263,7 +390,10 @@ export function reconcile(prev: readonly SceneElement[], next: readonly SceneEle
         let a: LinearElement = t
         if (bindingTarget(a.startBinding) === el.id) a = updateElement(a, { startBinding: null })
         if (bindingTarget(a.endBinding) === el.id) a = updateElement(a, { endBinding: null })
-        if (a !== t) put(a)
+        if (a !== t) {
+          put(a)
+          if (a.elbowed === true) cleared.add(a.id)
+        }
       }
     }
     if (isBoundText(el)) {
@@ -314,13 +444,14 @@ export function reconcile(prev: readonly SceneElement[], next: readonly SceneEle
 
   // 3. Bound arrow ends follow shapes whose geometry changed, and arrows whose geometry changed
   const arrows = new Set<string>()
+  for (const id of cleared) if (live(id)) arrows.add(id)
   const shapesToCheck = new Set<string>([...changed.map((e) => e.id), ...laidOut])
   for (const id of shapesToCheck) {
     const el = live(id)
     if (!el) continue
     if (isLinear(el)) {
       const was = prevById.get(id)
-      if (el.type === 'arrow' && (geometryChanged(was, el) || bindingsChanged(was, el))) arrows.add(id)
+      if (el.type === 'arrow' && arrowNeedsRecompute(was, el, live)) arrows.add(id)
       else if (was && JSON.stringify(was.roundness) !== JSON.stringify(el.roundness)) arrowLabelsDirty.add(id)
     } else if (geometryChanged(prevById.get(id), el)) {
       for (const r of getBoundRefs(el)) if (r.type === 'arrow' && live(r.id)) arrows.add(r.id)
@@ -329,7 +460,7 @@ export function reconcile(prev: readonly SceneElement[], next: readonly SceneEle
   for (const id of arrows) {
     const a = live(id)
     if (!a || !isLinear(a)) continue
-    const r = recomputeBoundEnds(a, live, placingEnd(prevById.get(id), a))
+    const r = recomputeArrow(a, live, placingEnd(prevById.get(id), a))
     if (r !== a) {
       put(r)
       for (const end of ['start', 'end'] as const) {

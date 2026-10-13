@@ -115,3 +115,27 @@ describe('serialization', () => {
     expect(parseScene({ elements: [null, 3, { noType: true }] })!.elements).toEqual([])
   })
 })
+
+describe('elbow arrows', () => {
+  it('round-trips the elbow fields', () => {
+    const shape = createShape('rectangle', 0, 0)
+    const arrow = {
+      ...createLinear('arrow', 0, 0),
+      elbowed: true,
+      roundness: null,
+      fixedSegments: null,
+      startIsSpecial: null,
+      endIsSpecial: null,
+      startBinding: { elementId: shape.id, focus: 0, gap: 4, fixedPoint: [1.0001, 0.5001] },
+    }
+    const parsed = parseScene(JSON.parse(JSON.stringify(serializeScene([shape, arrow]))))!
+    expect(parsed.elements[1]).toMatchObject({
+      elbowed: true,
+      roundness: null,
+      fixedSegments: null,
+      startIsSpecial: null,
+      endIsSpecial: null,
+      startBinding: { fixedPoint: [1.0001, 0.5001] },
+    })
+  })
+})

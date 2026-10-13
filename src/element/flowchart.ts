@@ -2,7 +2,7 @@ import type { Box, LinearElement, SceneElement, ShapeElement } from './types'
 import { isBoundText, isFrame, isLinear, isShape } from './types'
 import { createLinear, createShape, updateElement } from './factory'
 import { getBoxCenter, getElementBounds, getElementBox, withAbsolutePoints } from './geometry'
-import { bindingTarget, bindArrowEnd, reconcile, recomputeBoundEnds } from './relations'
+import { bindingTarget, bindArrowEnd, reconcile, recomputeArrow } from './relations'
 import { roundnessFor, styleForNew } from './style'
 import type { Edges, StyleDefaults } from './style'
 import { snapPointToGrid } from './snap'
@@ -287,7 +287,7 @@ export function convertNodeTypes(
   }
   const lookup = (id: string) => byId.get(id) ?? elements.find((e) => e.id === id)
   for (const a of arrows.values()) {
-    const r = recomputeBoundEnds(a, lookup)
+    const r = recomputeArrow(a, lookup)
     if (r !== a) byId.set(a.id, r)
   }
   return elements.map((e) => byId.get(e.id) ?? e)
