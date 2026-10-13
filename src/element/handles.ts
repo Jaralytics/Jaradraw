@@ -33,17 +33,20 @@ export function getHandlePositions(
 ): { handle: HandleHit; x: number; y: number }[] {
   const b = getElementBox(el)
   const c = getBoxCenter(b)
-  const rotate = pointEdit
+  // elbow arrows only have their two end handles: no rotation, no point editing
+  const elbow = isLinear(el) && el.elbowed === true
+  const edit = pointEdit && !elbow
+  const rotate = edit || elbow
     ? []
     : [{ handle: { kind: 'rotate' } as HandleHit, ...rotationHandlePosition(b, el.angle, zoom) }]
   if (isLinear(el)) {
     const pts = getAbsolutePoints(el)
-    const idx = pointEdit ? pts.map((_, i) => i) : pts.length > 1 ? [0, pts.length - 1] : [0]
+    const idx = edit ? pts.map((_, i) => i) : pts.length > 1 ? [0, pts.length - 1] : [0]
     const out = idx.map((index) => {
       const p = rotatePoint(pts[index][0], pts[index][1], c.x, c.y, el.angle)
       return { handle: { kind: 'point', index } as HandleHit, x: p.x, y: p.y }
     })
-    if (pointEdit) {
+    if (edit) {
       const curved = isCurved(el)
       for (let i = 0; i < pts.length - 1; i++) {
         const m = segmentMidpoint(el.points, i, curved)

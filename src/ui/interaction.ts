@@ -4,7 +4,8 @@ import { clampZoom, screenToScene, zoomViewportAt } from '../scene/viewport'
 import { setLastPointerScene } from '../scene/pointer'
 import { createLinear, createShape, updateElement } from '../element/factory'
 import { findBindTarget, pointInsideElement } from '../element/bind'
-import { expandWithLabels } from '../element/relations'
+import { bindingTarget, expandWithLabels, rerouteElbowArrow } from '../element/relations'
+import { layoutLabel } from '../element/label'
 import { dedupePoints } from '../element/points'
 import { insertMidpoint } from '../element/points'
 import { getBoxCenter, getElementBounds, getElementBox, withAbsolutePoints } from '../element/geometry'
@@ -279,6 +280,12 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     return sh && pointInsideElement(sh, endPoint.x, endPoint.y) ? null : startTarget
   }
 
+  /** Orthogonal preview of an elbow arrow whose ends may snap to the given shapes; other elements pass through. */
+  function routePreview(arrow: LinearElement, override: { start?: string | null; end?: string | null }): LinearElement {
+    if (arrow.elbowed !== true) return arrow
+    return rerouteElbowArrow(arrow, (id) => st().elements.find((x) => x.id === id), override)
+  }
+
   function endMode(): void {
     mode = { kind: 'idle' }
     activePointerId = null
@@ -444,8 +451,14 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       const p = snapPoint(toScene(s), e)
       const lastFixed = mode.fixed[mode.fixed.length - 1]
       if (Math.hypot(p.x - lastFixed.x, p.y - lastFixed.y) * st().viewport.zoom < 3) return
-      mode = { ...mode, fixed: [...mode.fixed, p] }
-      st().setDraft(placingDraft(mode, p))
+      const next = { ...mode, fixed: [...mode.fixed, p] }
+      mode = next
+      // an elbow arrow always has exactly two points: the second click finishes it
+      if (next.base.elbowed === true) {
+        finishPlacing(e)
+        return
+      }
+      st().setDraft(placingDraft(next, p))
       return
     }
     if (mode.kind !== 'idle') return
@@ -528,8 +541,9 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     setLastPointerScene(toScene(s))
     if (mode.kind === 'placing') {
       const p = snapPoint(toScene(s), e)
-      state.setDraft(placingDraft(mode, p))
-      state.setBindHighlight(mode.tool === 'arrow' ? targetAt(p, e, mode.fixed[0]) : null)
+      const endTarget = mode.tool === 'arrow' ? targetAt(p, e, mode.fixed[0]) : null
+      state.setDraft(routePreview(placingDraft(mode, p), { start: startFor(mode.startTarget, p, endTarget), end: endTarget }))
+      state.setBindHighlight(endTarget)
       return
     }
     if (mode.kind !== 'idle' && e.pointerId !== activePointerId) return
@@ -550,8 +564,10 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
         const p = snapCreationPoint(raw, e, !arrow || targetAt(raw, e, mode.origin) === null)
         const next = updateElement(mode.draft, creationPatch(mode.tool, mode.origin, p))
         mode = { ...mode, draft: next }
-        state.setDraft(next)
-        state.setBindHighlight(arrow ? targetAt(p, e, mode.origin) : null)
+        const endTarget = arrow ? targetAt(p, e, mode.origin) : null
+        const linearDraft = isLinear(next) ? routePreview(next, { start: startFor(mode.startTarget, p, endTarget), end: endTarget }) : next
+        state.setDraft(linearDraft)
+        state.setBindHighlight(endTarget)
         state.setSnapGuides(
           objectSnapOn(e)
             ? edgeGuides(
@@ -641,10 +657,24 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
             guides = edgeGuides({ x: p.x, y: p.y, width: 0, height: 0 }, idx)
           }
           state.setSnapGuides(guides)
+          const bindTarget = original.type === 'arrow' && endpoint ? targetAt(p, e, otherAbs) : null
           state.replaceElements([moveLinearPoint(original, handle.index, p.x, p.y)])
           if (original.type === 'arrow' && endpoint) {
-            pendingBind = targetAt(p, e, otherAbs)
+            pendingBind = bindTarget
             state.setBindHighlight(pendingBind)
+          }
+          if (original.elbowed === true && endpoint) {
+            // reconcile leaves the dragged end free; the preview already shows the side it will bind to
+            const cur = st().elements.find((x) => x.id === original.id)
+            // bindArrowEnd refuses both ends on one shape, so the preview leaves that end free as release does
+            const target = cur && isLinear(cur) && bindTarget === bindingTarget(handle.index === 0 ? cur.endBinding : cur.startBinding) ? null : bindTarget
+            const routed = cur && isLinear(cur) ? routePreview(cur, handle.index === 0 ? { start: target } : { end: target }) : null
+            if (routed && routed !== cur) {
+              // the bound label follows the preview in the same raw write
+              const label = st().elements.find((x) => !x.isDeleted && isText(x) && x.containerId === routed.id)
+              const laid = label && isText(label) ? layoutLabel(routed, label).label : null
+              state.restoreElements(st().elements.map((x) => (x.id === routed.id ? routed : laid && x.id === laid.id ? laid : x)))
+            }
           }
         } else if (handle.kind === 'box') {
           const lock = isText(original) || (isImage(original) && !e.shiftKey) ? getElementBox(original) : null
@@ -861,7 +891,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
         return
       }
       if (isLinear(hit)) {
-        if (e.ctrlKey || e.metaKey || hit.type === 'line') {
+        if ((e.ctrlKey || e.metaKey || hit.type === 'line') && hit.elbowed !== true) {
           state.setSelection([hit.id])
           state.setPointEdit({ id: hit.id, selected: null })
         } else state.openLabelEditor(hit.id)

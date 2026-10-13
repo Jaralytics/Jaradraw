@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createLinear, createShape } from '../element/factory'
 import { withAbsolutePoints } from '../element/geometry'
 import { createLabel } from '../element/label'
-import { attachLabel } from '../element/relations'
+import { attachLabel, bindArrowEnd, rerouteElbowArrow } from '../element/relations'
+import { getHandlePositions } from '../element/handles'
+import { moveElement } from '../element/resize'
 import { outlinePointToward } from '../element/bind'
 import { DEFAULT_STYLE_DEFAULTS, styleForNew } from '../element/style'
 import type { LinearElement, SceneElement } from '../element/types'
@@ -316,5 +318,115 @@ describe('elbow path type', () => {
     expect(a.boundElements).toContainEqual({ type: 'text', id: label.id })
     expect(label.x + label.width / 2).toBeCloseTo(a.x + a.points[1][0] / 2, 0)
     expect(label.y + label.height / 2).toBeCloseTo(a.y + a.points[1][1] / 2, 0)
+  })
+
+  it('previews a routed draft that equals the committed arrow', () => {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const a = rectAt(0, 0)
+    const b = rectAt(300, 40)
+    st().commitDraft(a)
+    st().commitDraft(b)
+    const draft = withAbsolutePoints(
+      createLinear('arrow', 100, 25, styleForNew({ ...DEFAULT_STYLE_DEFAULTS, curve: 'elbow' }, 'arrow')),
+      [[100, 25], [300, 65]],
+    )
+    const preview = rerouteElbowArrow(draft, (id) => st().elements.find((e) => e.id === id), { start: a.id, end: b.id })
+    expect(axisAligned(preview)).toBe(true)
+    st().commitDraft(draft, { start: a.id, end: b.id })
+    const committed = arrowOf()
+    const p = absPoints(preview)
+    const c = absPoints(committed)
+    expect(c).toHaveLength(p.length)
+    c.forEach((q, i) => {
+      expect(q.x).toBeCloseTo(p[i].x, 6)
+      expect(q.y).toBeCloseTo(p[i].y, 6)
+    })
+  })
+
+  it('overrides free a bound end without clearing its binding and bind a free end', () => {
+    const { a, b } = setup()
+    const lookup = (i: string) => st().elements.find((e) => e.id === i)
+    const arrow = arrowOf()
+    const freed = rerouteElbowArrow(arrow, lookup, { end: null })
+    expect(axisAligned(freed)).toBe(true)
+    expect((freed.endBinding as { elementId: string }).elementId).toBe(b.id)
+    expect((freed.startBinding as { elementId: string }).elementId).toBe(a.id)
+    const bound = rerouteElbowArrow({ ...arrow, endBinding: null }, lookup, { end: b.id })
+    expect((bound.endBinding as { elementId: string }).elementId).toBe(b.id)
+  })
+
+  it('refuses to bind both ends of an arrow to one shape, which the drag preview mirrors', () => {
+    const { a, id } = setup()
+    const els = bindArrowEnd(st().elements, id, 'end', a.id)
+    const arrow = els.find((e) => e.id === id) as LinearElement
+    expect(arrow.endBinding).toBeNull()
+    expect((arrow.startBinding as { elementId: string }).elementId).toBe(a.id)
+  })
+
+  it('re-routes with a free end when a bound shape is deleted or one end is unbound', () => {
+    const { b, id } = setup()
+    st().applyStyle({ curve: 'elbow' })
+    const oldEnd = absPoints(arrowOf()).at(-1)!
+    st().unbindEnd(id, 'end')
+    let arrow = arrowOf()
+    expect(arrow.endBinding).toBeNull()
+    expect(arrow.startBinding).not.toBeNull()
+    expect(axisAligned(arrow)).toBe(true)
+    expect(absPoints(arrow).at(-1)!.x).toBeCloseTo(oldEnd.x)
+    st().setSelection([b.id])
+    st().deleteSelected()
+    arrow = arrowOf()
+    expect(axisAligned(arrow)).toBe(true)
+    expect(arrow.points.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('leaves point editing when the edited arrow becomes elbow', () => {
+    const { id } = setup()
+    st().setPointEdit({ id, selected: null })
+    expect(st().pointEdit).not.toBeNull()
+    st().applyStyle({ curve: 'elbow' })
+    expect(st().pointEdit).toBeNull()
+  })
+
+  it('has no rotate, mid or interior point handles', () => {
+    setup()
+    st().applyStyle({ curve: 'elbow' })
+    const arrow = arrowOf()
+    for (const edit of [false, true]) {
+      const kinds = getHandlePositions(arrow, edit, 1).map((h) => h.handle.kind)
+      expect(kinds).toEqual(['point', 'point'])
+    }
+    const straight = { ...arrow, elbowed: false }
+    expect(getHandlePositions(straight, false, 1).map((h) => h.handle.kind)).toContain('rotate')
+  })
+
+  it('ignores point editing and point deletion on elbow arrows only', () => {
+    const { id } = setup()
+    st().applyStyle({ curve: 'elbow' })
+    st().setPointEdit({ id, selected: null })
+    expect(st().pointEdit).toBeNull()
+    st().applyStyle({ curve: 'sharp' })
+    st().setPointEdit({ id, selected: null })
+    expect(st().pointEdit).toEqual({ id, selected: null })
+    st().setPointEdit(null)
+    st().applyStyle({ curve: 'elbow' })
+    useStore.setState({ pointEdit: { id, selected: 1 } })
+    const before = arrowOf()
+    expect(st().deletePoint()).toBe(false)
+    expect(arrowOf()).toBe(before)
+  })
+
+  it('keeps its shape when a bound elbow arrow is detached and moved', () => {
+    const { id } = setup()
+    st().applyStyle({ curve: 'elbow' })
+    const before = arrowOf()
+    st().detachArrows(new Set([id]), new Set())
+    const detached = arrowOf()
+    expect(detached.startBinding).toBeNull()
+    expect(detached.endBinding).toBeNull()
+    expect(detached.points).toEqual(before.points)
+    st().replaceElements([moveElement(detached, 50, 20)])
+    expect(arrowOf().points).toEqual(before.points)
+    expect(arrowOf().x).toBeCloseTo(before.x + 50)
   })
 })

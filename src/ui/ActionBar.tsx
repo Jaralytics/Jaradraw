@@ -60,7 +60,7 @@ export function ActionBar() {
     )
   }
   const grouped = selected.some((e) => e.groupIds.length > 0)
-  const single = selected.length === 1 && isLinear(selected[0])
+  const single = selected.length === 1 && isLinear(selected[0]) && selected[0].elbowed !== true
 
   return (
     <div className="panel action-bar" role="toolbar" aria-label="Acciones">

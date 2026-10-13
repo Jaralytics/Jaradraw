@@ -340,9 +340,8 @@ function arrowNeedsRecompute(
   if (!was) return !elbow
   if (!isLinear(was)) return true
   if ((was.elbowed === true) !== elbow) return true
-  if (bindingsChanged(was, el)) return true
-  if (!geometryChanged(was, el)) return false
-  if (!elbow) return true
+  if (!elbow) return bindingsChanged(was, el) || geometryChanged(was, el)
+  if (!bindingsChanged(was, el) && !geometryChanged(was, el)) return false
   const bound = (['start', 'end'] as const).some((end) => {
     const t = bindingTarget(el[BINDING_KEY[end]])
     const s = t ? live(t) : undefined

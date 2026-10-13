@@ -53,7 +53,7 @@ export function editSelected(points: boolean): void {
     return
   }
   if (isLinear(el)) {
-    if (points || el.type === 'line') st().setPointEdit({ id: el.id, selected: null })
+    if ((points || el.type === 'line') && el.elbowed !== true) st().setPointEdit({ id: el.id, selected: null })
     else st().openLabelEditor(el.id)
   } else if (points) {
     return

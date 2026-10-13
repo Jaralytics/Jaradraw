@@ -533,7 +533,11 @@ export const useStore = create<State>()((set, get) => {
       if (snapGuides.length === 0 && get().snapGuides.length === 0) return
       set({ snapGuides })
     },
-    setPointEdit: (pointEdit) => set({ pointEdit }),
+    setPointEdit: (pointEdit) => {
+      const el = pointEdit ? get().elements.find((e) => e.id === pointEdit.id) : undefined
+      if (el && isLinear(el) && el.elbowed === true) return
+      set({ pointEdit })
+    },
     setGestureActive: (active) => {
       gestureActive = active
     },
@@ -725,7 +729,7 @@ export const useStore = create<State>()((set, get) => {
       const { pointEdit: pe, elements } = get()
       if (!pe || pe.selected === null) return false
       const el = elements.find((e) => e.id === pe.id)
-      if (!el || !isLinear(el)) return false
+      if (!el || !isLinear(el) || el.elbowed === true) return false
       const removed = removePoint(el, pe.selected)
       if (!removed) return false
       let base = elements
@@ -750,7 +754,10 @@ export const useStore = create<State>()((set, get) => {
       const mapped = selectedIds.length
         ? mapIfChanged(elements, (e) => (ids.has(e.id) ? applyStyleToElement(e, patch) : e))
         : elements
-      set({ defaults: { ...defaults, ...patch }, elements: reconcile(elements, mapped) })
+      const next = reconcile(elements, mapped)
+      const pe = get().pointEdit
+      const leavePointEdit = !!pe && patch.curve === 'elbow' && next.some((e) => e.id === pe.id && isLinear(e) && e.elbowed === true)
+      set({ defaults: { ...defaults, ...patch }, elements: next, ...(leavePointEdit ? { pointEdit: null } : {}) })
       // a curve choice is a discrete step, never merged with the previous one
       checkpoint(`style:${Object.keys(patch).join(',')}:${selectedIds.join(',')}`, !('curve' in patch))
     },
