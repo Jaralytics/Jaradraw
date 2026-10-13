@@ -467,7 +467,8 @@ describe('elbow path type', () => {
     expect(kinds.slice(2).every((k) => k === 'waypoint')).toBe(true)
     expect(kinds).toHaveLength(arrow.points.length)
     const straight = { ...arrow, elbowed: false }
-    expect(getHandlePositions(straight, 1).map((h) => h.handle.kind)).toContain('rotate')
+    expect(getHandlePositions(straight, 1).map((h) => h.handle.kind)).not.toContain('rotate')
+    expect(getHandlePositions(createShape('rectangle', 0, 0), 1).map((h) => h.handle.kind)).toContain('rotate')
   })
 
   it('ignores point editing and point deletion on elbow arrows only', () => {

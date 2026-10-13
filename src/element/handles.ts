@@ -29,11 +29,9 @@ const CORNER_DIRS: Dir[] = ['nw', 'ne', 'se', 'sw']
 export function getHandlePositions(el: SceneElement, zoom = 1): { handle: HandleHit; x: number; y: number }[] {
   const b = getElementBox(el)
   const c = getBoxCenter(b)
-  // elbow arrows only have their two end handles and no rotation
-  const elbow = isLinear(el) && el.elbowed === true
-  const rotate = elbow ? [] : [{ handle: { kind: 'rotate' } as HandleHit, ...rotationHandlePosition(b, el.angle, zoom) }]
   if (isLinear(el)) {
-    // every node of a straight or curved line is a handle; node handles come before rotate so they win overlaps
+    // lines and arrows have node handles only: no rotation handle, since rotating detaches bound arrows
+    const elbow = el.elbowed === true
     const pts = getAbsolutePoints(el)
     const idx = elbow ? (pts.length > 1 ? [0, pts.length - 1] : [0]) : pts.map((_, i) => i)
     const out = idx.map((index) => {
@@ -43,7 +41,7 @@ export function getHandlePositions(el: SceneElement, zoom = 1): { handle: Handle
     if (elbow) {
       elbowNodes(el).forEach((n, index) => out.push({ handle: { kind: 'waypoint', index } as HandleHit, x: n.x, y: n.y }))
     }
-    return [...out, ...rotate]
+    return out
   }
   const pos: Record<Dir, Vec> = {
     nw: { x: b.x, y: b.y },
@@ -61,7 +59,7 @@ export function getHandlePositions(el: SceneElement, zoom = 1): { handle: Handle
       const p = rotatePoint(pos[dir].x, pos[dir].y, c.x, c.y, el.angle)
       return { handle: { kind: 'box', dir } as HandleHit, x: p.x, y: p.y }
     }),
-    ...rotate,
+    { handle: { kind: 'rotate' } as HandleHit, ...rotationHandlePosition(b, el.angle, zoom) },
   ]
 }
 
