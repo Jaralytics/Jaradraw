@@ -1,6 +1,6 @@
-import type { SceneElement } from './types'
+import type { LinearElement, SceneElement } from './types'
 import { isImage, isShape, isText } from './types'
-import { getBoxCenter, getElementBox, rotatePoint } from './geometry'
+import { getAbsolutePoints, getBoxCenter, getElementBox, rotatePoint, withAbsolutePoints } from './geometry'
 import type { Vec } from './geometry'
 import { hitTestElement } from './hit'
 
@@ -45,6 +45,49 @@ export function outlinePointToward(el: SceneElement, from: Vec, gap = BIND_GAP):
   const r = radiusAlong(el, dx, dy) + gap
   const p = { x: c.x + dx * r, y: c.y + dy * r }
   return el.angle === 0 ? p : rotatePoint(p.x, p.y, c.x, c.y, el.angle)
+}
+
+/**
+ * Preview of a non-elbow arrow with its first and last points moved onto the given shapes' outlines,
+ * the same anchors the committed arrow gets. Elbow arrows are returned unchanged.
+ */
+export function anchorArrowPreview(
+  arrow: LinearElement,
+  start: SceneElement | null | undefined,
+  end: SceneElement | null | undefined,
+): LinearElement {
+  if (arrow.elbowed === true || (!start && !end)) return arrow
+  const src = getAbsolutePoints(arrow)
+  const n = src.length
+  if (n < 2) return arrow
+  const abs = src.map((p) => [p[0], p[1]] as const)
+  const at = (i: number): Vec => ({ x: src[i][0], y: src[i][1] })
+  const center = (el: SceneElement): Vec => getBoxCenter(getElementBox(el))
+  if (start) {
+    const p = outlinePointToward(start, n === 2 && end ? center(end) : at(1))
+    abs[0] = [p.x, p.y]
+  }
+  if (end) {
+    const p = outlinePointToward(end, n === 2 && start ? center(start) : at(n - 2))
+    abs[n - 1] = [p.x, p.y]
+  }
+  return withAbsolutePoints(arrow, abs)
+}
+
+/**
+ * Whether a click while placing an arrow ends it on the shape under the pointer: only arrows, only
+ * on a bind target, and never on the start shape while the arrow still has just its first point.
+ */
+export function clickEndsArrow(o: {
+  tool: 'line' | 'arrow'
+  elbowed: boolean
+  target: string | null
+  startTarget: string | null
+  fixedCount: number
+  noBind: boolean
+}): boolean {
+  if (o.tool !== 'arrow' || o.elbowed || o.noBind || !o.target) return false
+  return !(o.fixedCount < 2 && o.target === o.startTarget)
 }
 
 /** True when the scene point lies inside the element's area (rotation aware). */

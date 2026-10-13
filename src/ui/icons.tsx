@@ -260,6 +260,13 @@ export const FlipIcon = ({ vertical = false }: { vertical?: boolean }) => (
   </Icon>
 )
 
+export const CropIcon = ({ off = false }: { off?: boolean }) => (
+  <Icon>
+    <path d="M6 2.5 V14 H17.5 M2.5 6 H14 V17.5" />
+    {off && <path d="M3.5 16.5 L16.5 3.5" />}
+  </Icon>
+)
+
 export type AlignIconKind = 'left' | 'centerH' | 'right' | 'top' | 'middle' | 'bottom' | 'distH' | 'distV'
 
 const ALIGN_PATHS: Record<AlignIconKind, string> = {

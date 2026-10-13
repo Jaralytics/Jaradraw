@@ -1,13 +1,15 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { Box, SceneElement } from '../element/types'
+import type { Box, ImageCrop, ImageElement, SceneElement } from '../element/types'
 import { getCommonBounds } from '../element/geometry'
-import { containerIdOf, isBoundText, isLabelable, isLinear, isRenderable, isText } from '../element/types'
+import { containerIdOf, isBoundText, isImage, isLabelable, isLinear, isRenderable, isText } from '../element/types'
 import type { LinearElement } from '../element/types'
 import { createText, updateElement } from '../element/factory'
 import { cloneCentered } from '../element/clone'
 import { assignFrames, releaseFrameChildren, withFrameChildren } from '../element/frame'
-import { createImageElement, sanitizeFiles } from '../element/image'
+import { createImageElement, hasDataURL, sanitizeFiles } from '../element/image'
+import { cropFrame, elementAtCrop, parseCrop, resetCrop, sameCrop } from '../element/crop'
+import type { CropFrame } from '../element/crop'
 import { createLibraryItem } from '../element/library'
 import type { LibraryItem } from '../element/library'
 import { isDark, loadThemePref, saveThemePref } from './theme'
@@ -142,6 +144,22 @@ export type Modal =
   | { kind: 'confirm'; title: string; message: string; confirmLabel: string; onConfirm: () => void; cancelFocus?: boolean }
   | null
 
+export interface CropSession {
+  id: string
+  /** The element and element list as they were when crop mode started. */
+  before: ImageElement
+  prior: readonly SceneElement[]
+  frame: CropFrame
+}
+
+/** The single selected, unlocked image whose binary is loaded: the only one that can be cropped. */
+export function croppableImage(s: Pick<State, 'elements' | 'selectedIds' | 'files' | 'tool'>): ImageElement | null {
+  if (s.tool !== 'selection' || s.selectedIds.length !== 1) return null
+  const el = s.elements.find((e) => e.id === s.selectedIds[0])
+  if (!el || el.isDeleted || el.locked || !isImage(el) || !el.fileId || !hasDataURL(s.files[el.fileId])) return null
+  return el
+}
+
 interface State {
   elements: readonly SceneElement[]
   draft: SceneElement | null
@@ -154,7 +172,11 @@ interface State {
   defaults: StyleDefaults
   textEditor: TextEditorState | null
   pointEdit: PointEdit | null
+  /** Image whose crop window is being edited; the element already carries the live crop. */
+  cropping: CropSession | null
   bindHighlight: string | null
+  /** Shape an arrow being drawn is anchored to at its start. */
+  bindAnchor: string | null
   /** Group entered with a double click: its members can be selected individually. */
   editingGroupId: string | null
   /** Ids touched by the eraser, shown faded until the gesture ends. */
@@ -207,7 +229,7 @@ interface State {
   detachArrows: (arrowIds: ReadonlySet<string>, keep: ReadonlySet<string>) => void
   unbindEnd: (arrowId: string, end: 'start' | 'end') => void
   bindEnds: (arrowId: string, ends: { start?: string | null; end?: string | null }) => void
-  setBindHighlight: (id: string | null) => void
+  setBindHighlight: (id: string | null, anchor?: string | null) => void
   setEditingGroup: (id: string | null) => void
   setErasing: (ids: readonly string[]) => void
   setSnapGuides: (guides: readonly SnapGuide[]) => void
@@ -241,6 +263,19 @@ interface State {
   applyStyle: (patch: StylePatch) => void
   reorderSelection: (op: ZOrderOp) => void
   nudgeSelection: (dx: number, dy: number) => void
+  /**
+   * Enters crop mode on the croppable selected image. `natural` is the pixel size of its binary,
+   * needed only when the image has no crop yet. No history entry.
+   */
+  startCrop: (natural?: { width: number; height: number }) => boolean
+  /** Live crop window update; the element box follows so the visible region stays put. No history entry. */
+  updateCrop: (crop: ImageCrop) => void
+  /** Leaves crop mode keeping the crop: one undo entry, none when nothing changed. */
+  applyCrop: () => void
+  /** Leaves crop mode and restores the crop it started with. */
+  cancelCrop: () => void
+  /** Shows the whole image of the single selected cropped image, keeping the visible region in place. One undo entry. */
+  clearCrop: () => void
   /**
    * Shows (or grows) the pending parallel nodes next to the single selected node. The same direction
    * adds one more node (up to 9); another direction starts over with one. No history entry.
@@ -362,7 +397,9 @@ export const useStore = create<State>()((set, get) => {
       elements: snap.elements,
       selectedIds: get().tool === 'selection' ? changed : [],
       pointEdit: null,
+      cropping: null,
       bindHighlight: null,
+      bindAnchor: null,
       draft: null,
       marquee: null,
       textEditor: null,
@@ -405,7 +442,9 @@ export const useStore = create<State>()((set, get) => {
     defaults: DEFAULT_STYLE_DEFAULTS,
     textEditor: null,
     pointEdit: null,
+    cropping: null,
     bindHighlight: null,
+    bindAnchor: null,
     editingGroupId: null,
     erasing: [],
     snapGuides: [],
@@ -494,12 +533,14 @@ export const useStore = create<State>()((set, get) => {
 
     setTool: (tool) => {
       get().commitTextEditor()
+      if (tool !== 'selection') get().applyCrop()
       set({
         pendingImages: tool === 'image' ? get().pendingImages : null,
         tool,
         draft: null,
         pointEdit: null,
         bindHighlight: null,
+        bindAnchor: null,
         erasing: [],
         snapGuides: [],
         editingGroupId: tool === 'selection' ? get().editingGroupId : null,
@@ -511,6 +552,8 @@ export const useStore = create<State>()((set, get) => {
       const labelIds = new Set(els.filter(isBoundText).map((e) => e.id))
       if (ids.some((id) => labelIds.has(id))) ids = ids.filter((id) => !labelIds.has(id))
       if (sameIds(ids, get().selectedIds)) return
+      const session = get().cropping
+      if (session && !(ids.length === 1 && ids[0] === session.id)) get().applyCrop()
       const pe = get().pointEdit
       const eg = get().editingGroupId
       const keepGroup = eg !== null && ids.length > 0 && ids.every((id) => els.find((e) => e.id === id)?.groupIds.includes(eg))
@@ -534,8 +577,8 @@ export const useStore = create<State>()((set, get) => {
     setViewport: (vp) => set({ viewport: { ...vp, zoom: clampZoom(vp.zoom) } }),
     setDraft: (draft) => set({ draft }),
     setMarquee: (marquee) => set({ marquee }),
-    setBindHighlight: (id) => {
-      if (get().bindHighlight !== id) set({ bindHighlight: id })
+    setBindHighlight: (id, anchor = null) => {
+      if (get().bindHighlight !== id || get().bindAnchor !== anchor) set({ bindHighlight: id, bindAnchor: anchor })
     },
     setEditingGroup: (editingGroupId) => {
       if (get().editingGroupId !== editingGroupId) set({ editingGroupId })
@@ -606,6 +649,7 @@ export const useStore = create<State>()((set, get) => {
         draft: null,
         pointEdit: null,
         bindHighlight: null,
+        bindAnchor: null,
         editingGroupId: null,
       })
       checkpoint('create')
@@ -831,6 +875,58 @@ export const useStore = create<State>()((set, get) => {
       if (next === elements) return
       set({ elements: next })
       checkpoint('zorder')
+    },
+
+    startCrop: (natural) => {
+      flushNudge()
+      get().commitTextEditor()
+      const s = get()
+      const el = croppableImage(s)
+      if (!el || s.cropping) return false
+      const frame = cropFrame(el, natural)
+      if (!frame) return false
+      set({ cropping: { id: el.id, before: el, prior: s.elements, frame }, pointEdit: null, editingGroupId: null })
+      return true
+    },
+
+    updateCrop: (crop) => {
+      const { cropping, elements } = get()
+      const el = cropping ? elements.find((e) => e.id === cropping.id) : undefined
+      if (!cropping || !el || !isImage(el)) return
+      const next = elementAtCrop(el, cropping.frame, crop)
+      set({ elements: reconcile(elements, elements.map((e) => (e.id === el.id ? next : e))) })
+    },
+
+    applyCrop: () => {
+      const { cropping, elements } = get()
+      if (!cropping) return
+      set({ cropping: null })
+      const el = elements.find((e) => e.id === cropping.id)
+      if (!el || !isImage(el)) return
+      if (sameCrop(parseCrop(el.crop), parseCrop(cropping.before.crop))) {
+        set({ elements: elements.map((e) => (e.id === cropping.id ? cropping.before : e)) })
+        return
+      }
+      const framed = assignFrames(elements, new Set([el.id]))
+      if (framed !== elements) set({ elements: framed })
+      checkpoint('crop')
+    },
+
+    cancelCrop: () => {
+      const { cropping, elements } = get()
+      if (!cropping) return
+      const restored = elements.map((e) => (e.id === cropping.id ? cropping.before : e))
+      set({ cropping: null, elements: reconcile(elements, restored) })
+    },
+
+    clearCrop: () => {
+      flushNudge()
+      const s = get()
+      const el = s.selectedIds.length === 1 ? s.elements.find((e) => e.id === s.selectedIds[0]) : undefined
+      if (s.cropping || !el || el.locked || !isImage(el) || !parseCrop(el.crop)) return
+      const next = resetCrop(el)
+      set({ elements: assignFrames(reconcile(s.elements, s.elements.map((e) => (e.id === el.id ? next : e))), new Set([el.id])) })
+      checkpoint('crop')
     },
 
     nudgeSelection: (dx, dy) => {
@@ -1141,6 +1237,7 @@ export const useStore = create<State>()((set, get) => {
         selectedIds: [],
         draft: null,
         pointEdit: null,
+        cropping: null,
         editingGroupId: null,
         history: createHistory<Snapshot>({ elements: scene.elements, selectedIds: [] }),
       })
@@ -1161,9 +1258,11 @@ export const useStore = create<State>()((set, get) => {
         viewport: scene.viewport,
         selectedIds: [],
         draft: null,
+        cropping: null,
         textEditor: null,
         pointEdit: null,
         bindHighlight: null,
+        bindAnchor: null,
         editingGroupId: null,
         erasing: [],
         fileName,

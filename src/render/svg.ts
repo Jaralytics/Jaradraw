@@ -5,6 +5,7 @@ import { getBoxCenter, getElementBox } from '../element/geometry'
 import { freedrawOutline, outlineToPath } from '../element/freedraw'
 import { fontStack } from '../element/text'
 import { FRAME_NAME_SIZE, FRAME_RADIUS, frameLabel } from '../element/frame'
+import { parseCrop } from '../element/crop'
 import { exportBounds } from './bounds'
 import { generator, getDrawables } from './draw'
 
@@ -71,6 +72,14 @@ function imageSvg(el: ImageElement, files: Record<string, unknown>): string {
     sx < 0 || sy < 0
       ? ` transform="translate(${num(el.width / 2)} ${num(el.height / 2)}) scale(${sx < 0 ? -1 : 1} ${sy < 0 ? -1 : 1}) translate(${num(-el.width / 2)} ${num(-el.height / 2)})"`
       : ''
+  const crop = parseCrop(el.crop)
+  if (crop) {
+    // a nested svg clips to its own box and maps the cropped region onto it; the full binary is drawn in crop coordinates
+    return (
+      `<g${flip}><svg width="${num(el.width)}" height="${num(el.height)}" viewBox="${num(crop.x)} ${num(crop.y)} ${num(crop.width)} ${num(crop.height)}" preserveAspectRatio="none" overflow="hidden">` +
+      `<image href="${esc(file.dataURL)}" x="0" y="0" width="${num(crop.naturalWidth)}" height="${num(crop.naturalHeight)}" preserveAspectRatio="none"/></svg></g>`
+    )
+  }
   return `<image href="${esc(file.dataURL)}" width="${num(el.width)}" height="${num(el.height)}" preserveAspectRatio="none"${flip}/>`
 }
 

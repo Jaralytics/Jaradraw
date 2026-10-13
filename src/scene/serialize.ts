@@ -4,6 +4,7 @@ import type { SceneElement } from '../element/types'
 import { sanitizeRelations } from '../element/relations'
 import { lockWholeGroups } from '../element/group'
 import { sanitizeFiles } from '../element/image'
+import { parseCrop } from '../element/crop'
 import { releaseFrameChildren } from '../element/frame'
 import { GRID_SIZE, GRID_STEP } from '../element/snap'
 
@@ -146,6 +147,7 @@ export function parseElement(raw: unknown): SceneElement | null {
       out.scale = [1, 1]
     }
     if (typeof out.fileId !== 'string') out.fileId = null
+    out.crop = parseCrop(out.crop)
   }
   if (raw.type === 'freedraw') {
     const valid = Array.isArray(out.points) ? out.points.filter(isPoint) : []

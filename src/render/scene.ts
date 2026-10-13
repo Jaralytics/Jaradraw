@@ -1,5 +1,8 @@
 import type { Box, SceneElement } from '../element/types'
-import { isLinear } from '../element/types'
+import { isImage, isLinear } from '../element/types'
+import type { ImageElement } from '../element/types'
+import type { CropFrame } from '../element/crop'
+import { rotatePoint } from '../element/geometry'
 import { getElementCorners } from '../element/geometry'
 import { getGroupHandlePositions, getHandlePositions, rotationHandlePosition } from '../element/handles'
 import { getSelectionBounds, groupMembers, selectionUnits } from '../element/group'
@@ -8,7 +11,7 @@ import { sceneToScreen } from '../scene/viewport'
 import type { Viewport } from '../scene/viewport'
 import { drawElements, pruneDrawableCache } from './draw'
 import { transformColor } from './color'
-import { pruneImages } from './imageCache'
+import { getDecodedImage, pruneImages } from './imageCache'
 import { collectFileIds } from '../element/image'
 import type { PointEdit } from '../scene/store'
 import { getBoxCenter, getElementBox } from '../element/geometry'
@@ -37,7 +40,11 @@ export interface RenderParams {
   marquee: Box | null
   hiddenId: string | null
   bindHighlight: string | null
+  /** Start shape of the arrow being drawn, highlighted together with the hovered one. */
+  bindAnchor?: string | null
   pointEdit: PointEdit | null
+  /** Crop session in progress: the full image and the crop window replace the usual selection frame. */
+  cropping?: { id: string; frame: CropFrame } | null
   grid?: GridParams | null
   guides?: readonly SnapGuide[]
   fadedIds?: readonly string[]
@@ -83,8 +90,10 @@ export function renderScene(p: RenderParams): void {
     for (const el of p.preview) live.add(el.id)
     drawElements(ctx, p.canvas, p.preview, p.backgroundColor, null, undefined, null, { ...env, alpha: PREVIEW_ALPHA })
   }
-  const target = p.bindHighlight ? p.elements.find((e) => e.id === p.bindHighlight && !e.isDeleted) : undefined
-  if (target) drawBindHighlight(ctx, target, vp)
+  for (const id of new Set([p.bindAnchor, p.bindHighlight])) {
+    const target = id ? p.elements.find((e) => e.id === id && !e.isDeleted) : undefined
+    if (target) drawBindHighlight(ctx, target, vp)
+  }
   ctx.restore()
   if (p.elements.length > 0) {
     pruneDrawableCache(live)
@@ -94,7 +103,9 @@ export function renderScene(p: RenderParams): void {
   if (p.editingGroupId) drawEditingGroup(ctx, p.elements, p.editingGroupId, vp)
 
   const sel = p.selected.filter((e) => !e.isDeleted && e.id !== p.hiddenId)
-  if (sel.length === 1) drawSelection(ctx, sel[0], vp, p.pointEdit?.id === sel[0].id ? p.pointEdit : null)
+  const cropEl = p.cropping && sel.length === 1 && sel[0].id === p.cropping.id && isImage(sel[0]) ? sel[0] : null
+  if (cropEl && p.cropping) drawCropOverlay(ctx, cropEl, p.cropping.frame, p.files, vp, p.dark === true)
+  else if (sel.length === 1) drawSelection(ctx, sel[0], vp, p.pointEdit?.id === sel[0].id ? p.pointEdit : null)
   else if (sel.length > 1) drawMultiSelection(ctx, sel, vp, p.editingGroupId ?? null)
 
   if (p.guides && p.guides.length) drawGuides(ctx, p.guides, vp)
@@ -217,6 +228,74 @@ function drawGuides(ctx: CanvasRenderingContext2D, guides: readonly SnapGuide[],
       ctx.fillStyle = '#ffffff'
       ctx.fillText(l.text, l.x, l.y + 0.5)
     }
+  }
+  ctx.restore()
+}
+
+const CROP_DIM = 'rgba(0, 0, 0, 0.5)'
+
+/** Crop mode: the full image outside the window, dimmed, and the window with its eight handles. */
+function drawCropOverlay(
+  ctx: CanvasRenderingContext2D,
+  el: ImageElement,
+  frame: CropFrame,
+  files: Record<string, unknown> | undefined,
+  vp: Viewport,
+  dark: boolean,
+): void {
+  const { center: c, width: w, height: h } = frame
+  const outer = [
+    [c.x - w / 2, c.y - h / 2],
+    [c.x + w / 2, c.y - h / 2],
+    [c.x + w / 2, c.y + h / 2],
+    [c.x - w / 2, c.y + h / 2],
+  ].map(([x, y]) => {
+    const r = rotatePoint(x, y, c.x, c.y, frame.angle)
+    return sceneToScreen(vp, r.x, r.y)
+  })
+  const inner = getElementCorners(el).map((q) => sceneToScreen(vp, q.x, q.y))
+  const trace = () => {
+    for (const poly of [outer, inner]) {
+      poly.forEach((q, i) => (i === 0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y)))
+      ctx.closePath()
+    }
+  }
+
+  ctx.save()
+  ctx.beginPath()
+  trace()
+  ctx.clip('evenodd')
+  const file = el.fileId ? (files?.[el.fileId] as { dataURL?: string } | undefined) : undefined
+  const img = el.fileId ? getDecodedImage(el.fileId, file?.dataURL) : null
+  if (img) {
+    const s = sceneToScreen(vp, c.x, c.y)
+    ctx.translate(s.x, s.y)
+    ctx.rotate(frame.angle)
+    ctx.scale((frame.flipX ? -1 : 1) * vp.zoom, (frame.flipY ? -1 : 1) * vp.zoom)
+    ctx.drawImage(img, -w / 2, -h / 2, w, h)
+    ctx.restore()
+    ctx.save()
+    ctx.beginPath()
+    trace()
+    ctx.clip('evenodd')
+  }
+  ctx.fillStyle = dark ? 'rgba(0, 0, 0, 0.6)' : CROP_DIM
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+  ctx.restore()
+
+  ctx.save()
+  ctx.strokeStyle = ACCENT
+  ctx.fillStyle = handleFill
+  ctx.lineWidth = 1.5
+  strokeCorners(ctx, el, vp)
+  ctx.lineWidth = 1
+  for (const hd of getHandlePositions(el, vp.zoom)) {
+    if (hd.handle.kind !== 'box') continue
+    const s = sceneToScreen(vp, hd.x, hd.y)
+    ctx.beginPath()
+    ctx.rect(s.x - 4, s.y - 4, 8, 8)
+    ctx.fill()
+    ctx.stroke()
   }
   ctx.restore()
 }

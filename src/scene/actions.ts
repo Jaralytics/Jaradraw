@@ -1,4 +1,4 @@
-import { useStore, getSelectedElements } from './store'
+import { useStore, getSelectedElements, croppableImage } from './store'
 import { cloneCentered, cloneElements } from '../element/clone'
 import { createText } from '../element/factory'
 import { measureText } from '../element/text'
@@ -10,6 +10,7 @@ import { filesForElements, hasDataURL, isImageMime, missingFileIds } from '../el
 import { parseLibrary, serializeLibrary } from '../element/library'
 import type { SceneElement } from '../element/types'
 import { downloadBlob } from '../render/export'
+import { getImageSize } from '../render/imageCache'
 import { isTypingTarget } from '../ui/dom'
 import { DIRECTION_BY_KEY, isNode } from '../element/flowchart'
 import { parseClipboardData, serializeClipboard } from './clipboard'
@@ -65,6 +66,19 @@ export function editSelected(): void {
   }
 }
 
+/** Enters crop mode on the selected image, or applies the crop when already in it. */
+export function toggleCrop(): void {
+  if (st().cropping) {
+    st().applyCrop()
+    return
+  }
+  const el = croppableImage(st())
+  if (!el || !el.fileId) return
+  const dataURL = (st().files[el.fileId] as { dataURL?: string } | undefined)?.dataURL
+  const natural = getImageSize(el.fileId, dataURL)
+  if (natural || el.crop) st().startCrop(natural ?? undefined)
+}
+
 const viewSize = () => ({ width: window.innerWidth, height: window.innerHeight })
 
 /** Ctrl+Arrow: preview connected nodes in the pressed direction; releasing Ctrl inserts them. */
@@ -112,6 +126,7 @@ function pointerOrCenter() {
 
 function onCopy(e: ClipboardEvent, cut: boolean): void {
   if (st().modal || isTypingTarget(e.target)) return
+  if (cut && st().cropping) return
   const els = selectedWithLabels()
   if (els.length === 0) return
   if (missingFileIds(els, st().files).length > 0) {
@@ -133,7 +148,7 @@ function onCopy(e: ClipboardEvent, cut: boolean): void {
 }
 
 function onPaste(e: ClipboardEvent): void {
-  if (st().modal || isTypingTarget(e.target)) return
+  if (st().modal || isTypingTarget(e.target) || st().cropping) return
   e.preventDefault()
   let text = ''
   let systemAvailable = false
