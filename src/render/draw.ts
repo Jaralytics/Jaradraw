@@ -155,12 +155,42 @@ function curvePathData(points: readonly Point[]): string {
   return d
 }
 
+const ELBOW_RADIUS = 10
+
+/** Polyline with rounded corners; the radius shrinks to half of the shorter adjacent segment. */
+export function roundedPathData(points: readonly Point[], radius = ELBOW_RADIUS): string {
+  let d = `M ${points[0][0]} ${points[0][1]}`
+  for (let i = 1; i < points.length - 1; i++) {
+    const [px, py] = points[i - 1]
+    const [cx, cy] = points[i]
+    const [nx, ny] = points[i + 1]
+    const inLen = Math.hypot(cx - px, cy - py)
+    const outLen = Math.hypot(nx - cx, ny - cy)
+    const r = Math.min(radius, inLen / 2, outLen / 2)
+    if (r <= 0) continue
+    const ax = cx - ((cx - px) / inLen) * r
+    const ay = cy - ((cy - py) / inLen) * r
+    const bx = cx + ((nx - cx) / outLen) * r
+    const by = cy + ((ny - cy) / outLen) * r
+    d += ` L ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`
+  }
+  const last = points[points.length - 1]
+  return `${d} L ${last[0]} ${last[1]}`
+}
+
 function linearDrawables(el: LinearElement, bg: string, col: (c: string) => string): Drawable[] {
   const pts = el.points
   const o = { ...roughOptions(el, col), fill: undefined }
   if (pts.length < 2) return []
   const path = pts.map((p) => [p[0], p[1]] as [number, number])
-  const out: Drawable[] = [isCurved(el) ? generator.path(curvePathData(pts), o) : generator.linearPath(path, o)]
+  const rounded = el.elbowed === true && el.roughness > 0 && pts.length > 2
+  const out: Drawable[] = [
+    isCurved(el)
+      ? generator.path(curvePathData(pts), o)
+      : rounded
+        ? generator.path(roundedPathData(pts), o)
+        : generator.linearPath(path, o),
+  ]
   const n = pts.length
   const dist = (a: Point, b: Point) => Math.hypot(a[0] - b[0], a[1] - b[1])
   const end = normalizeArrowhead(el.endArrowhead)
