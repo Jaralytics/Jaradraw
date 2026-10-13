@@ -1,6 +1,7 @@
 import type { Point, SceneElement } from './types'
 import { isBoundText, isFreedraw, isImage, isLinear } from './types'
 import { updateElement } from './factory'
+import { carryWaypoints } from './elbowWaypoints'
 import type { Vec } from './geometry'
 import {
   bakeAngle,
@@ -53,7 +54,7 @@ export function rotateElements(elements: readonly SceneElement[], center: Vec, d
           const r = rotatePoint(p[0], p[1], center.x, center.y, delta)
           return [r.x, r.y] as Point
         })
-        return withAbsolutePoints(el, abs)
+        return carryWaypoints(el, withAbsolutePoints(el, abs), (w) => rotatePoint(w.x, w.y, center.x, center.y, delta))
       }
       const c = getBoxCenter(getElementBox(el))
       const n = rotatePoint(c.x, c.y, center.x, center.y, delta)
@@ -79,7 +80,7 @@ export function flipElements(elements: readonly SceneElement[], axis: FlipAxis):
         const m = mirror(p[0], p[1])
         return [m.x, m.y] as Point
       })
-      return withAbsolutePoints(el, abs)
+      return carryWaypoints(el, withAbsolutePoints(el, abs), (w) => mirror(w.x, w.y))
     }
     if (isFreedraw(el)) {
       const o = mirror(el.x, el.y)

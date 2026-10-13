@@ -34,29 +34,30 @@ export function selectedWithLabels(): SceneElement[] {
 }
 
 export function deleteAction(): void {
-  if (st().pointEdit?.selected != null) {
-    // with a point selected, Delete only ever removes that point (never the whole element)
-    st().deletePoint()
-    return
+  const pe = st().pointEdit
+  if (pe?.selected != null || pe?.waypoint !== undefined) {
+    if (st().deletePoint()) return
+    // a stale node never takes the whole element with it; a locked element is left to deleteSelected, which skips it
+    if (!st().elements.find((e) => e.id === pe.id)?.locked) {
+      st().setPointEdit(null)
+      return
+    }
   }
   st().deleteSelected()
 }
 
-/** Enter: edit the label of the selected shape or arrow, a free text, or the points of a line. */
-export function editSelected(points: boolean): void {
+/** Enter: edit the label of the selected shape or arrow, or a free text. */
+export function editSelected(): void {
   const sel = getSelectedElements(st())
   if (sel.length !== 1) return
   const el = sel[0]
   if (el.locked) return
   if (el.type === 'frame') {
-    if (!points) st().showModal({ kind: 'renameFrame', id: el.id })
+    st().showModal({ kind: 'renameFrame', id: el.id })
     return
   }
   if (isLinear(el)) {
-    if ((points || el.type === 'line') && el.elbowed !== true) st().setPointEdit({ id: el.id, selected: null })
-    else st().openLabelEditor(el.id)
-  } else if (points) {
-    return
+    if (el.type === 'arrow') st().openLabelEditor(el.id)
   } else if (isShape(el)) {
     st().openLabelEditor(el.id)
   } else if (isText(el) && el.containerId == null) {

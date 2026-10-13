@@ -150,8 +150,17 @@ function stubFor(box: Bounds | null, point: Vec, h: Heading, padX: number, padY:
   return { anchor, tip: { x: anchor.x + DIRS[h].x * pad, y: anchor.y + DIRS[h].y * pad } }
 }
 
-/** `sides` pins the side a bound end uses (the side of its box the arrow leaves from or arrives at). */
-export function routeElbow(start: ElbowEnd, end: ElbowEnd, sides: { start?: Heading; end?: Heading } = {}): ElbowRoute {
+export interface ElbowOptions {
+  /** Pins the side a bound end uses (the side of its box the arrow leaves from or arrives at). */
+  start?: Heading
+  end?: Heading
+  /** The route may not leave the start in this direction (it would double back along the previous leg). */
+  forbidStart?: Heading
+  /** Extra boxes the route should not cross. */
+  obstacles?: readonly Bounds[]
+}
+
+export function routeElbow(start: ElbowEnd, end: ElbowEnd, sides: ElbowOptions = {}): ElbowRoute {
   const sp = start.point
   const ep = end.point
   const fallback: ElbowRoute = { points: [{ ...sp }, { ...ep }], startHeading: 'right', endHeading: 'left', bends: 0, clean: true }
@@ -161,7 +170,7 @@ export function routeElbow(start: ElbowEnd, end: ElbowEnd, sides: { start?: Head
   const eBox: Bounds = end.box ?? [ep.x, ep.y, ep.x, ep.y]
   const padX = padFor(Math.max(eBox[0] - sBox[2], sBox[0] - eBox[2]))
   const padY = padFor(Math.max(eBox[1] - sBox[3], sBox[1] - eBox[3]))
-  const solids = [start.box, end.box].filter((b): b is Bounds => b !== null)
+  const solids = [start.box, end.box, ...(sides.obstacles ?? [])].filter((b): b is Bounds => b !== null)
   const u: Bounds = [
     Math.min(sBox[0], eBox[0]) - padX,
     Math.min(sBox[1], eBox[1]) - padY,
@@ -192,8 +201,11 @@ export function routeElbow(start: ElbowEnd, end: ElbowEnd, sides: { start?: Head
         [{ x: ts.x, y: u[3] }, { x: te.x, y: u[3] }],
       ]
       for (const mid of mids) {
-        const r = scorePath([s.anchor, ts, ...mid, te, e.anchor], solids)
+        let r = scorePath([s.anchor, ts, ...mid, te, e.anchor], solids)
         if (r.points.length < 2) continue
+        if (sides.forbidStart && headingOf(r.points[0], r.points[1]) === sides.forbidStart) {
+          r = { ...r, score: r.score + CROSS_PENALTY, flawed: true }
+        }
         const c: Candidate = { ...r, si, ei }
         if (isBetter(c, best)) best = c
       }
@@ -208,5 +220,43 @@ export function routeElbow(start: ElbowEnd, end: ElbowEnd, sides: { start?: Head
     endHeading: OPPOSITE[headingOf(points[points.length - 2], points[points.length - 1])],
     bends: points.length - 2,
     clean: !best.flawed && points.length - 2 <= 2,
+  }
+}
+
+/**
+ * Routes through ordered waypoints: one `routeElbow` leg per pair, each waypoint a free end, joined
+ * into one polyline. A leg never leaves a waypoint back along the previous leg, and the legs avoid
+ * the box of the bound shape they do not touch. With no waypoints this is `routeElbow`.
+ */
+export function routeElbowVia(start: ElbowEnd, waypoints: readonly Vec[], end: ElbowEnd, sides: ElbowOptions = {}): ElbowRoute {
+  if (waypoints.length === 0) return routeElbow(start, end, sides)
+  const nodes: ElbowEnd[] = [start, ...waypoints.map((point) => ({ point, box: null })), end]
+  let raw: Vec[] = []
+  let forbid: Heading | undefined
+  let clean = true
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const a = nodes[i]
+    const b = nodes[i + 1]
+    // only the first and last legs avoid the shape they do not touch; a leg between two waypoints is what the user built
+    const obstacles = [i === nodes.length - 2 ? start.box : null, i === 0 ? end.box : null].filter((x): x is Bounds => x !== null)
+    const leg = routeElbow(a, b, {
+      start: i === 0 ? sides.start : undefined,
+      end: i === nodes.length - 2 ? sides.end : undefined,
+      forbidStart: forbid,
+      obstacles,
+    })
+    clean = clean && leg.clean
+    raw = raw.length === 0 ? leg.points : [...raw, ...leg.points.slice(1)]
+    const n = leg.points.length
+    if (n >= 2 && !samePoint(leg.points[n - 2], leg.points[n - 1])) forbid = OPPOSITE[headingOf(leg.points[n - 2], leg.points[n - 1])]
+  }
+  const points = simplify(raw)
+  if (points.length < 2) return { points: [{ ...start.point }, { ...end.point }], startHeading: 'right', endHeading: 'left', bends: 0, clean: false }
+  return {
+    points,
+    startHeading: headingOf(points[0], points[1]),
+    endHeading: OPPOSITE[headingOf(points[points.length - 2], points[points.length - 1])],
+    bends: points.length - 2,
+    clean,
   }
 }

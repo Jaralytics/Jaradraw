@@ -2,6 +2,7 @@ import type { Box, LinearElement, Point, SceneElement } from './types'
 import { isFreedraw, isLinear } from './types'
 import { updateElement } from './factory'
 import { flattenElementPath, isCurved } from './path'
+import { customDataWith, readWaypoints } from './waypoints'
 
 export interface Vec {
   x: number
@@ -107,13 +108,19 @@ export function withAbsolutePoints(el: LinearElement, abs: readonly Point[]): Li
   const origin = abs[0]
   const points = abs.map(([x, y]) => [x - origin[0], y - origin[1]] as Point)
   const b = getPointsBounds(points)
-  return updateElement(el, {
+  const patch: Record<string, unknown> = {
     x: origin[0],
     y: origin[1],
     points,
     width: b.maxX - b.minX,
     height: b.maxY - b.minY,
-  })
+  }
+  // waypoints are relative to x/y: a new origin must not move them in the scene
+  const wps = readWaypoints(el)
+  if (wps.length > 0 && (origin[0] !== el.x || origin[1] !== el.y)) {
+    patch.customData = customDataWith(el, wps.map(([wx, wy]) => [wx + el.x - origin[0], wy + el.y - origin[1]] as Point))
+  }
+  return updateElement(el, patch as Partial<LinearElement>)
 }
 
 /**
@@ -127,5 +134,17 @@ export function bakeAngle<T extends SceneElement>(el: T): T {
     const r = rotatePoint(x, y, c.x, c.y, el.angle)
     return [r.x, r.y] as Point
   })
-  return updateElement(withAbsolutePoints(el, abs), { angle: 0 }) as unknown as T
+  const baked = withAbsolutePoints(el, abs)
+  const wps = readWaypoints(el)
+  const patch: Record<string, unknown> = { angle: 0 }
+  if (wps.length > 0) {
+    patch.customData = customDataWith(
+      el,
+      wps.map(([wx, wy]) => {
+        const r = rotatePoint(el.x + wx, el.y + wy, c.x, c.y, el.angle)
+        return [r.x - baked.x, r.y - baked.y] as Point
+      }),
+    )
+  }
+  return updateElement(baked, patch as Partial<LinearElement>) as unknown as T
 }

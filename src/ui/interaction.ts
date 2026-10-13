@@ -7,7 +7,9 @@ import { findBindTarget, pointInsideElement } from '../element/bind'
 import { bindingTarget, expandWithLabels, rerouteElbowArrow } from '../element/relations'
 import { layoutLabel } from '../element/label'
 import { dedupePoints } from '../element/points'
-import { insertMidpoint } from '../element/points'
+import { pinElbow } from '../element/elbowWaypoints'
+import { closestOnPolyline, dragElbow, editPolyline, elbowNodes } from '../element/elbowEdit'
+import type { EditEnds, ElbowTarget } from '../element/elbowEdit'
 import { getBoxCenter, getElementBounds, getElementBox, withAbsolutePoints } from '../element/geometry'
 import { createFreedraw, appendFreedrawPoints, finishFreedraw } from '../element/freedraw'
 import { rotateElements, rotationDelta, selectionCenter } from '../element/transform'
@@ -66,6 +68,8 @@ type Mode =
   | { kind: 'placing'; tool: 'line' | 'arrow'; base: LinearElement; fixed: Vec[]; startTarget: string | null }
   | {
       kind: 'dragging'
+      /** Id of the selected line or arrow that gets a node at the press point if the press ends as a click. */
+      insertNodeAt: string | null
       originals: SceneElement[]
       sourceIds: readonly string[]
       start: Vec
@@ -84,6 +88,21 @@ type Mode =
       startScreen: Vec
       /** Endpoint to unbind once the pointer passes the drag threshold. */
       pendingUnbind: 'start' | 'end' | null
+      /** Interior nodes and waypoints: the pointer has passed the drag threshold. */
+      dragged: boolean
+    }
+  | {
+      kind: 'editingElbow'
+      original: LinearElement
+      poly: Vec[]
+      target: ElbowTarget
+      bound: EditEnds
+      /** Scene position of the press; the drag delta is measured from it. */
+      start: Vec
+      startScreen: Vec
+      dragged: boolean
+      /** Where the dragged node ended up, to find it again once the route is rebuilt. */
+      lastNode: Vec | null
     }
   | { kind: 'resizingGroup'; originals: SceneElement[]; box: Box; dir: Dir; started: boolean }
   | { kind: 'rotating'; originals: SceneElement[]; center: Vec; start: Vec; base: number; started: boolean }
@@ -107,6 +126,16 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
   let activeButton = 0
   let gesturePrior: readonly SceneElement[] | null = null
   let pendingBind: string | null = null
+  let lastInsert: { id: string; time: number; node: { selected: number | null; waypoint?: number } } | null = null
+  const recordInsert = (id: string) => {
+    const pe = st().pointEdit
+    lastInsert = pe?.id === id ? { id, time: Date.now(), node: { selected: pe.selected, waypoint: pe.waypoint } } : null
+  }
+  /** True when the handle is the node the last click inserted (the first click of a double click on the body). */
+  const isLastInsert = (id: string, h: HandleHit): boolean =>
+    lastInsert?.id === id &&
+    Date.now() - lastInsert.time < 700 &&
+    (h.kind === 'waypoint' ? lastInsert.node.waypoint === h.index : h.kind === 'point' && lastInsert.node.waypoint === undefined && lastInsert.node.selected === h.index)
   let before: { selectedIds: readonly string[]; tool: ReturnType<typeof useStore.getState>['tool'] } | null = null
   const st = () => useStore.getState()
 
@@ -131,8 +160,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     const zoom = st().viewport.zoom
     if (sel.some((e) => e.locked)) return null
     if (sel.length === 1) {
-      const pe = st().pointEdit
-      const handle = hitHandle(sel[0], p.x, p.y, zoom, !!pe && pe.id === sel[0].id)
+      const handle = hitHandle(sel[0], p.x, p.y, zoom)
       return handle ? { kind: 'single', element: sel[0], handle } : null
     }
     if (sel.length > 1) {
@@ -158,6 +186,9 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
         break
       case 'resizing':
         cursor = cursorForHandle(mode.handle)
+        break
+      case 'editingElbow':
+        cursor = mode.target.kind === 'node' ? 'crosshair' : 'move'
         break
       case 'resizingGroup':
         cursor = dirCursor(mode.dir)
@@ -344,10 +375,21 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     }
   }
 
+  /** Which ends of an arrow sit on a live shape. */
+  function boundEnds(arrow: LinearElement): EditEnds {
+    const on = (b: unknown) => {
+      const id = bindingTarget(b)
+      const el = id ? st().elements.find((x) => x.id === id) : undefined
+      return !!el && !el.isDeleted
+    }
+    return { start: on(arrow.startBinding), end: on(arrow.endBinding) }
+  }
+
   function startSelectionGesture(e: PointerEvent, p: Vec, s: Vec): void {
     const state = st()
     const target = handleAt(p)
     const pe = state.pointEdit
+    if (target?.kind === 'single' && !isLastInsert(target.element.id, target.handle)) lastInsert = null
     if (pe && !(target?.kind === 'single' && target.element.id === pe.id)) state.setPointEdit(null)
     if (target?.kind === 'single' && target.handle.kind === 'rotate') {
       const el = target.element
@@ -370,24 +412,25 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     }
     if (target?.kind === 'single') {
       const el = target.element
-      let handle = target.handle
-      let original: SceneElement = el
+      const handle = target.handle
       let pendingUnbind: 'start' | 'end' | null = null
-      if (handle.kind === 'mid' && isLinear(el)) {
-        const inserted = insertMidpoint(el, handle.index)
-        state.replaceElements([inserted])
-        original = inserted
-        handle = { kind: 'point', index: handle.index + 1 }
+      if (handle.kind === 'waypoint' && isLinear(el)) {
+        state.setPointEdit({ id: el.id, selected: null, waypoint: handle.index })
+        const poly = editPolyline(el)
+        mode = { kind: 'editingElbow', original: el, poly, target: { kind: 'node', index: handle.index }, bound: boundEnds(el), start: p, startScreen: s, dragged: false, lastNode: poly[handle.index + 1] ?? null }
+        return
       }
       if (handle.kind === 'point' && isLinear(el)) {
-        if (st().pointEdit?.id === el.id) state.setPointEdit({ id: el.id, selected: handle.index })
+        const lastIdx = el.points.length - 1
+        // only interior nodes become the active node (the one Supr deletes); elbow arrows have waypoints instead
+        if (el.elbowed === true) state.setPointEdit(null)
+        else state.setPointEdit({ id: el.id, selected: handle.index === 0 || handle.index === lastIdx ? null : handle.index })
         if (el.type === 'arrow') {
-          const lastIdx = isLinear(original) ? original.points.length - 1 : 0
           if (handle.index === 0) pendingUnbind = 'start'
           else if (handle.index === lastIdx) pendingUnbind = 'end'
         }
       }
-      mode = { kind: 'resizing', original, handle, startScreen: s, pendingUnbind }
+      mode = { kind: 'resizing', original: el, handle, startScreen: s, pendingUnbind, dragged: false }
       return
     }
     if (target?.kind === 'group') {
@@ -416,7 +459,18 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
       const sel = getSelectedElements(st())
       // locked elements can be selected but never moved
       if (sel.some((x) => x.locked)) return
+      // a plain click on the body of the already-selected line or arrow adds a node there
+      const addNode =
+        selected && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && cur.length === 1 && unit.length === 1 && isLinear(hit)
+      if (addNode && isLinear(hit) && hit.elbowed === true) {
+        // a segment of the selected elbow arrow moves on its own; a plain click on it adds a node
+        const poly = editPolyline(hit)
+        const seg = closestOnPolyline(poly, p).segment
+        mode = { kind: 'editingElbow', original: hit, poly, target: { kind: 'segment', index: seg }, bound: boundEnds(hit), start: p, startScreen: s, dragged: false, lastNode: null }
+        return
+      }
       mode = {
+        insertNodeAt: addNode ? hit.id : null,
         kind: 'dragging',
         originals: withFrameChildren(st().elements, sel),
         sourceIds: ids,
@@ -643,6 +697,12 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
           mode = { ...mode, original: fresh ?? mode.original, pendingUnbind: null }
         }
         const { original, handle } = mode
+        const interior = handle.kind === 'point' && isLinear(original) && original.elbowed !== true && handle.index > 0 && handle.index < original.points.length - 1
+        // a press on an interior node only drags once it passes the threshold, so a click never moves it
+        if (interior && !mode.dragged) {
+          if (Math.hypot(s.x - mode.startScreen.x, s.y - mode.startScreen.y) < MOVE_THRESHOLD_PX) break
+          mode = { ...mode, dragged: true }
+        }
         if (handle.kind === 'point' && isLinear(original)) {
           const endpoint = handle.index === 0 || handle.index === original.points.length - 1
           const otherEnd = original.points[handle.index === 0 ? original.points.length - 1 : 0]
@@ -685,6 +745,22 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
             const [x1, y1, x2, y2] = getElementBounds(next)
             state.setSnapGuides(resizeGuides({ x: x1, y: y1, width: x2 - x1, height: y2 - y1 }, handle.dir, sn.idx))
           }
+        }
+        break
+      }
+      case 'editingElbow': {
+        if (!mode.dragged) {
+          if (Math.hypot(s.x - mode.startScreen.x, s.y - mode.startScreen.y) < MOVE_THRESHOLD_PX) break
+          mode = { ...mode, dragged: true }
+        }
+        const raw = toScene(s)
+        const delta = { x: raw.x - mode.start.x, y: raw.y - mode.start.y }
+        const poly = dragElbow(mode.poly, mode.target, delta, mode.bound, (v) => snapPoint(v, e))
+        const routed = pinElbow(mode.original, poly, (id) => st().elements.find((x) => x.id === id))
+        state.replaceElements([routed])
+        if (mode.target.kind === 'node') {
+          const v = mode.poly[mode.target.index + 1]
+          mode = { ...mode, lastNode: snapPoint({ x: v.x + delta.x, y: v.y + delta.y }, e) }
         }
         break
       }
@@ -769,6 +845,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     else if (
       mode.kind === 'dragging' ||
       mode.kind === 'resizing' ||
+      mode.kind === 'editingElbow' ||
       mode.kind === 'resizingGroup' ||
       mode.kind === 'rotating'
     ) {
@@ -834,6 +911,9 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
           }
           state.endGesture(mode.duplicate ? 'duplicate' : 'move', gesturePrior ?? undefined)
         } else if (mode.collapseTo) state.setSelection(mode.collapseTo)
+        else if (mode.insertNodeAt && state.insertNode(mode.insertNodeAt, mode.start.x, mode.start.y)) {
+          recordInsert(mode.insertNodeAt)
+        }
         break
       case 'resizing': {
         const m = mode
@@ -844,7 +924,28 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
             state.bindEnds(el.id, idx === 0 ? { start: pendingBind } : { end: pendingBind })
           }
         }
-        state.endGesture(m.handle.kind === 'point' && state.pointEdit ? 'point' : 'resize', gesturePrior ?? undefined)
+        const node = (m.handle.kind === 'point' && isLinear(m.original) && m.original.elbowed !== true)
+        state.endGesture(node ? 'point' : 'resize', gesturePrior ?? undefined)
+        break
+      }
+      case 'editingElbow': {
+        const m = mode
+        if (m.dragged) {
+          const cur = st().elements.find((x) => x.id === m.original.id)
+          const last = m.lastNode
+          if (m.target.kind === 'node' && last && cur && isLinear(cur)) {
+            // the dragged node keeps being the active one, wherever it sits in the rebuilt route
+            const nodes = elbowNodes(cur)
+            let best = -1
+            nodes.forEach((n, i) => {
+              if (best < 0 || Math.hypot(n.x - last.x, n.y - last.y) < Math.hypot(nodes[best].x - last.x, nodes[best].y - last.y)) best = i
+            })
+            state.setPointEdit(best >= 0 ? { id: m.original.id, selected: null, waypoint: best } : null)
+          } else state.setPointEdit(null)
+          state.endGesture('point', gesturePrior ?? undefined)
+        } else if (m.target.kind === 'segment' && state.insertNode(m.original.id, m.start.x, m.start.y)) {
+          recordInsert(m.original.id)
+        }
         break
       }
       case 'resizingGroup':
@@ -876,6 +977,28 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     const state = st()
     if (state.tool !== 'selection' || state.textEditor) return
     const p = toScene(toScreen(e))
+    // a double click on a node handle deletes that node (the first click already made it the active one)
+    const target = handleAt(p)
+    // a node the first click of this double click just inserted is not an existing one: take it back and go on
+    const justInserted =
+      target?.kind === 'single' && isLastInsert(target.element.id, target.handle) && state.discardNodeInsert(target.element.id)
+    if (justInserted) lastInsert = null
+    if (!justInserted && target?.kind === 'single' && isLinear(target.element)) {
+      const h = target.handle
+      const last = target.element.points.length - 1
+      const edit =
+        h.kind === 'waypoint'
+          ? { id: target.element.id, selected: null, waypoint: h.index }
+          : h.kind === 'point' && h.index > 0 && h.index < last && target.element.elbowed !== true
+            ? { id: target.element.id, selected: h.index }
+            : null
+      if (edit) {
+        state.setPointEdit(edit)
+        state.deletePoint()
+        lastInsert = null
+        return
+      }
+    }
     const hit = hitAt(p)
     if (hit) {
       if (hit.locked) return
@@ -891,10 +1014,10 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
         return
       }
       if (isLinear(hit)) {
-        if ((e.ctrlKey || e.metaKey || hit.type === 'line') && hit.elbowed !== true) {
-          state.setSelection([hit.id])
-          state.setPointEdit({ id: hit.id, selected: null })
-        } else state.openLabelEditor(hit.id)
+        // the first click of this double click may have added a node: take it back without a history entry
+        if (lastInsert?.id === hit.id && Date.now() - lastInsert.time < 700) state.discardNodeInsert(hit.id)
+        lastInsert = null
+        if (hit.type === 'arrow') state.openLabelEditor(hit.id)
       } else if (isShape(hit)) state.openLabelEditor(hit.id)
       else if (isText(hit) && !isBoundText(hit)) state.openTextEditor({ id: hit.id, x: hit.x, y: hit.y, existing: true })
       return
@@ -963,7 +1086,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     }
 
     if (e.key === 'Escape') {
-      if (mode.kind === 'idle' && state.pointEdit) {
+      if (mode.kind === 'idle' && (state.pointEdit?.selected != null || state.pointEdit?.waypoint !== undefined)) {
         state.setPointEdit(null)
         return
       }

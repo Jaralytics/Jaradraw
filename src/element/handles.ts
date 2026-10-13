@@ -2,11 +2,11 @@ import type { Box, SceneElement } from './types'
 import { isLinear, isText } from './types'
 import type { Dir } from './resize'
 import { getAbsolutePoints, getBoxCenter, getElementBox, rotatePoint } from './geometry'
-import { isCurved, segmentMidpoint } from './path'
 import type { Vec } from './geometry'
+import { elbowNodes } from './elbowEdit'
 
-/** `mid` is the insertion handle of segment `index` (between points index and index + 1). */
-export type HandleHit = { kind: 'box'; dir: Dir } | { kind: 'rotate' } | { kind: 'point'; index: number } | { kind: 'mid'; index: number }
+/** `waypoint` indexes the node list of an elbow arrow (see `elbowNodes`), never its points. */
+export type HandleHit = { kind: 'box'; dir: Dir } | { kind: 'rotate' } | { kind: 'point'; index: number } | { kind: 'waypoint'; index: number }
 
 export const HANDLE_RADIUS_PX = 8
 export const ROTATE_OFFSET_PX = 24
@@ -26,33 +26,22 @@ export function hitRotationHandle(box: Box, angle: number, x: number, y: number,
 const ALL_DIRS: Dir[] = ['nw', 'ne', 'se', 'sw', 'n', 'e', 's', 'w']
 const CORNER_DIRS: Dir[] = ['nw', 'ne', 'se', 'sw']
 
-export function getHandlePositions(
-  el: SceneElement,
-  pointEdit = false,
-  zoom = 1,
-): { handle: HandleHit; x: number; y: number }[] {
+export function getHandlePositions(el: SceneElement, zoom = 1): { handle: HandleHit; x: number; y: number }[] {
   const b = getElementBox(el)
   const c = getBoxCenter(b)
-  // elbow arrows only have their two end handles: no rotation, no point editing
+  // elbow arrows only have their two end handles and no rotation
   const elbow = isLinear(el) && el.elbowed === true
-  const edit = pointEdit && !elbow
-  const rotate = edit || elbow
-    ? []
-    : [{ handle: { kind: 'rotate' } as HandleHit, ...rotationHandlePosition(b, el.angle, zoom) }]
+  const rotate = elbow ? [] : [{ handle: { kind: 'rotate' } as HandleHit, ...rotationHandlePosition(b, el.angle, zoom) }]
   if (isLinear(el)) {
+    // every node of a straight or curved line is a handle; node handles come before rotate so they win overlaps
     const pts = getAbsolutePoints(el)
-    const idx = edit ? pts.map((_, i) => i) : pts.length > 1 ? [0, pts.length - 1] : [0]
+    const idx = elbow ? (pts.length > 1 ? [0, pts.length - 1] : [0]) : pts.map((_, i) => i)
     const out = idx.map((index) => {
       const p = rotatePoint(pts[index][0], pts[index][1], c.x, c.y, el.angle)
       return { handle: { kind: 'point', index } as HandleHit, x: p.x, y: p.y }
     })
-    if (edit) {
-      const curved = isCurved(el)
-      for (let i = 0; i < pts.length - 1; i++) {
-        const m = segmentMidpoint(el.points, i, curved)
-        const p = rotatePoint(el.x + m.x, el.y + m.y, c.x, c.y, el.angle)
-        out.push({ handle: { kind: 'mid', index: i } as HandleHit, x: p.x, y: p.y })
-      }
+    if (elbow) {
+      elbowNodes(el).forEach((n, index) => out.push({ handle: { kind: 'waypoint', index } as HandleHit, x: n.x, y: n.y }))
     }
     return [...out, ...rotate]
   }
@@ -101,27 +90,16 @@ export function hitGroupHandle(box: Box, x: number, y: number, zoom: number): Di
   return null
 }
 
-export function hitHandle(
-  el: SceneElement,
-  x: number,
-  y: number,
-  zoom: number,
-  pointEdit = false,
-): HandleHit | null {
+export function hitHandle(el: SceneElement, x: number, y: number, zoom: number): HandleHit | null {
   const r = HANDLE_RADIUS_PX / zoom
-  // points win over midpoints when they overlap
-  const all = getHandlePositions(el, pointEdit, zoom)
-  for (const h of all) {
-    if (h.handle.kind !== 'mid' && Math.abs(h.x - x) <= r && Math.abs(h.y - y) <= r) return h.handle
-  }
-  for (const h of all) {
-    if (h.handle.kind === 'mid' && Math.abs(h.x - x) <= r && Math.abs(h.y - y) <= r) return h.handle
+  for (const h of getHandlePositions(el, zoom)) {
+    if (Math.abs(h.x - x) <= r && Math.abs(h.y - y) <= r) return h.handle
   }
   return null
 }
 
 export function cursorForHandle(h: HandleHit): string {
-  if (h.kind === 'point' || h.kind === 'mid') return 'crosshair'
+  if (h.kind === 'point' || h.kind === 'waypoint') return 'crosshair'
   if (h.kind === 'rotate') return 'grab'
   switch (h.dir) {
     case 'n':

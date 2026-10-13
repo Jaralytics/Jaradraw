@@ -26,7 +26,8 @@ import {
   rerouteElbowArrow,
   unbindArrowEnd,
 } from '../element/relations'
-import { removePoint } from '../element/points'
+import { insertNodeAt, removePoint } from '../element/points'
+import { deleteElbowNode, insertElbowNode } from '../element/elbowWaypoints'
 import { sameContent } from '../element/equal'
 import { reorderElements } from '../element/zorder'
 import { MAX_FLOW_COUNT, connectNodes, convertNodeTypes, isNode, nearestConnected, planConnectedNodes, revealBox } from '../element/flowchart'
@@ -100,9 +101,13 @@ export interface TextEditorState {
   opaque: boolean
 }
 
+/** The active node of the selected line or arrow. */
 export interface PointEdit {
   id: string
+  /** Index into `points` (straight and curved lines and arrows). */
   selected: number | null
+  /** Index into the node list of an elbow arrow (interior vertices of its route plus pinned nodes); never a point index. */
+  waypoint?: number
 }
 
 export interface InitialScene {
@@ -214,7 +219,12 @@ interface State {
   commitDraft: (el: SceneElement, ends?: { start?: string | null; end?: string | null }) => void
   /** With `prior` (elements at gesture start), a gesture that changed nothing creates no entry. */
   endGesture: (kind: 'move' | 'resize' | 'duplicate' | 'point' | 'rotate', prior?: readonly SceneElement[]) => void
+  /** Deletes the active interior node of the edited line or arrow as one entry; false when there is none. */
   deletePoint: () => boolean
+  /** Adds a node at the closest path position to the scene point and makes it the active node (one entry). */
+  insertNode: (id: string, x: number, y: number) => boolean
+  /** Pops the entries of the last node inserts (up to two, for a double click); the caller enforces the time window, and each pops only while it is still the top entry, untouched. */
+  discardNodeInsert: (id: string) => boolean
   addElements: (els: readonly SceneElement[], reason: 'paste' | 'duplicate') => void
   deleteSelected: () => void
   /** Adds a finished freehand stroke and keeps the pencil tool active. */
@@ -298,6 +308,8 @@ export const useStore = create<State>()((set, get) => {
   let nudgeTimer: ReturnType<typeof setTimeout> | undefined
   let noticeTimer: ReturnType<typeof setTimeout> | undefined
   let lastCheckpoint = { reason: '', time: 0 }
+  // the latest node inserts: element, history index and elements right after each one
+  let nodeInserts: { id: string; index: number; elements: readonly SceneElement[] }[] = []
   let gestureActive = false
   let nudgePending = false
   // Label font of the node a connected node was created from, used when its first label opens.
@@ -535,7 +547,8 @@ export const useStore = create<State>()((set, get) => {
     },
     setPointEdit: (pointEdit) => {
       const el = pointEdit ? get().elements.find((e) => e.id === pointEdit.id) : undefined
-      if (el && isLinear(el) && el.elbowed === true) return
+      // elbow arrows only have waypoints as nodes
+      if (el && isLinear(el) && el.elbowed === true && pointEdit?.waypoint === undefined) return
       set({ pointEdit })
     },
     setGestureActive: (active) => {
@@ -727,9 +740,21 @@ export const useStore = create<State>()((set, get) => {
     deletePoint: () => {
       flushNudge()
       const { pointEdit: pe, elements } = get()
-      if (!pe || pe.selected === null) return false
+      if (!pe) return false
       const el = elements.find((e) => e.id === pe.id)
-      if (!el || !isLinear(el) || el.elbowed === true) return false
+      if (el && isLinear(el) && el.elbowed === true && !el.locked && pe.waypoint !== undefined) {
+        const routed = deleteElbowNode(el, pe.waypoint, (id) => elements.find((e) => e.id === id))
+        if (!routed) return false
+        const unchanged = JSON.stringify([routed.points, routed.x, routed.y, routed.customData]) === JSON.stringify([el.points, el.x, el.y, el.customData])
+        set({
+          ...(unchanged ? {} : { elements: reconcile(elements, elements.map((e) => (e.id === el.id ? routed : e))) }),
+          pointEdit: { id: pe.id, selected: null },
+        })
+        checkpoint('point')
+        return true
+      }
+      if (pe.selected === null) return false
+      if (!el || !isLinear(el) || el.elbowed === true || el.locked) return false
       const removed = removePoint(el, pe.selected)
       if (!removed) return false
       let base = elements
@@ -745,6 +770,42 @@ export const useStore = create<State>()((set, get) => {
       return true
     },
 
+    insertNode: (id, x, y) => {
+      flushNudge()
+      const { elements } = get()
+      const el = elements.find((e) => e.id === id)
+      if (!el || !isLinear(el) || el.locked) return false
+      const elbow = el.elbowed === true
+      const ins = elbow ? insertElbowNode(el, x, y) : insertNodeAt(el, x, y)
+      if (!ins) return false
+      set({
+        elements: reconcile(elements, elements.map((e) => (e.id === id ? ins.element : e))),
+        pointEdit: elbow ? { id, selected: null, waypoint: ins.index } : { id, selected: ins.index },
+      })
+      const pushed = get().history
+      checkpoint('node-insert')
+      const after = get().history
+      if (after !== pushed) nodeInserts = [...nodeInserts, { id, index: after.index, elements: currentEntry(after).elements }].slice(-2)
+      return true
+    },
+
+    discardNodeInsert: (id) => {
+      let popped = 0
+      // the last inserts (a double click can add two) are still the top of the history, untouched since
+      for (;;) {
+        const { history, elements } = get()
+        const last = nodeInserts[nodeInserts.length - 1]
+        const prev = history.stack[history.index - 1]
+        if (!last || last.id !== id || last.index !== history.index || history.index !== history.stack.length - 1) break
+        if (last.elements !== elements || currentEntry(history).elements !== elements || !prev) break
+        nodeInserts = nodeInserts.slice(0, -1)
+        lastCheckpoint = { reason: '', time: 0 }
+        set({ elements: prev.elements, history: { stack: history.stack.slice(0, -1), index: history.index - 1 }, pointEdit: null })
+        popped++
+      }
+      return popped > 0
+    },
+
     applyStyle: (patch) => {
       flushNudge()
       const { selectedIds, elements, defaults } = get()
@@ -756,7 +817,8 @@ export const useStore = create<State>()((set, get) => {
         : elements
       const next = reconcile(elements, mapped)
       const pe = get().pointEdit
-      const leavePointEdit = !!pe && patch.curve === 'elbow' && next.some((e) => e.id === pe.id && isLinear(e) && e.elbowed === true)
+      const elbowOf = (list: readonly SceneElement[]) => list.some((e) => e.id === pe?.id && isLinear(e) && e.elbowed === true)
+      const leavePointEdit = !!pe && patch.curve !== undefined && elbowOf(next) !== elbowOf(elements)
       set({ defaults: { ...defaults, ...patch }, elements: next, ...(leavePointEdit ? { pointEdit: null } : {}) })
       // a curve choice is a discrete step, never merged with the previous one
       checkpoint(`style:${Object.keys(patch).join(',')}:${selectedIds.join(',')}`, !('curve' in patch))

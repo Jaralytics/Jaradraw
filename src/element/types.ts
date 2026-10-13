@@ -31,6 +31,8 @@ export interface ElementBase {
   readonly link: string | null
   readonly locked: boolean
   readonly index: string | null
+  /** Free-form data preserved across save and load; elbow arrows keep their waypoints here. */
+  readonly customData?: Record<string, unknown>
 }
 
 export interface ShapeElement extends ElementBase {

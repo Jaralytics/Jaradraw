@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid'
 import type { Box, SceneElement } from './types'
 import { containerIdOf, isBoundText, isFreedraw, isLinear, isRenderable, isText } from './types'
 import { updateElement } from './factory'
+import { carryWaypoints } from './elbowWaypoints'
 import { bakeAngle, getCommonBounds, getElementBounds } from './geometry'
 import type { Vec } from './geometry'
 
@@ -48,7 +49,17 @@ export function scaleElements(
 
   return originals.map((original) => {
     const el = bakeAngle(original)
-    if (isLinear(el) || isFreedraw(el)) {
+    if (isLinear(el)) {
+      const scaled = updateElement(el, {
+        x: mapX(el.x),
+        y: mapY(el.y),
+        width: el.width * scale,
+        height: el.height * scale,
+        points: el.points.map(([px, py]) => [px * scale, py * scale] as const),
+      } as Partial<typeof el>)
+      return carryWaypoints(el, scaled, (w) => ({ x: mapX(w.x), y: mapY(w.y) }))
+    }
+    if (isFreedraw(el)) {
       return updateElement(el, {
         x: mapX(el.x),
         y: mapY(el.y),

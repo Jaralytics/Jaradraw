@@ -203,15 +203,6 @@ export const CurveIcon = ({ curved, elbow = false }: { curved: boolean; elbow?: 
   </Icon>
 )
 
-export const PointsIcon = () => (
-  <Icon>
-    <path d="M5 14 10 6l5 8" />
-    <circle cx="5" cy="14" r="1.6" fill="currentColor" />
-    <circle cx="10" cy="6" r="1.6" fill="currentColor" />
-    <circle cx="15" cy="14" r="1.6" fill="currentColor" />
-  </Icon>
-)
-
 export const PencilIcon = () => (
   <Icon>
     <path d="M13.5 4.5 15.5 6.5 7 15 4 16 5 13 Z M12 6 14 8" />
@@ -244,7 +235,15 @@ export const LockIcon = ({ open = false }: { open?: boolean }) => (
   </Icon>
 )
 
-export const GroupIcon = ({ ungroup = false }: { ungroup?: boolean }) => (
+export const DeleteNodeIcon = () => (
+  <Icon>
+    <path d="M3 14 L8 8 L13 11" />
+    <circle cx="8" cy="8" r="2" />
+    <path d="M12 5 H17" />
+  </Icon>
+)
+
+export const GroupIcon =({ ungroup = false }: { ungroup?: boolean }) => (
   <Icon>
     <rect x="3.5" y="3.5" width="7" height="7" rx="1" />
     <rect x="9.5" y="9.5" width="7" height="7" rx="1" />

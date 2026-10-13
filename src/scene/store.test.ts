@@ -146,17 +146,84 @@ describe('review fixes', () => {
   })
 })
 
+describe('direct node editing', () => {
+  const line = () => {
+    const el = withAbsolutePoints(createLinear('line', 0, 0), [[0, 0], [100, 0], [100, 100]])
+    st().commitDraft(el)
+    return el
+  }
+  const current = (id: string) => st().elements.find((e) => e.id === id) as LinearElement
+
+  it('inserts a node as one entry and makes it the active node', () => {
+    const el = line()
+    const n = st().history.stack.length
+    expect(st().insertNode(el.id, 50, 4)).toBe(true)
+    expect(current(el.id).points).toHaveLength(4)
+    expect(current(el.id).points[1]).toEqual([50, 0])
+    expect(st().pointEdit).toEqual({ id: el.id, selected: 1 })
+    expect(st().history.stack.length).toBe(n + 1)
+    st().undo()
+    expect(current(el.id).points).toHaveLength(3)
+  })
+
+  it('deletes only the active interior node and keeps the line selected', async () => {
+    const { deleteAction } = await import('./actions')
+    const el = line()
+    st().insertNode(el.id, 50, 0)
+    const n = st().history.stack.length
+    deleteAction()
+    expect(current(el.id).points).toHaveLength(3)
+    expect(st().history.stack.length).toBe(n + 1)
+    expect(st().selectedIds).toEqual([el.id])
+    expect(st().pointEdit).toEqual({ id: el.id, selected: null })
+    deleteAction()
+    expect(current(el.id).isDeleted).toBe(true)
+  })
+
+  it('discards a just-inserted node without leaving a history entry', () => {
+    const el = line()
+    const n = st().history.stack.length
+    st().insertNode(el.id, 50, 0)
+    expect(st().discardNodeInsert(el.id)).toBe(true)
+    expect(current(el.id).points).toHaveLength(3)
+    expect(st().history.stack.length).toBe(n)
+    expect(st().discardNodeInsert(el.id)).toBe(false)
+  })
+
+  it('refuses the discard after an intervening entry', () => {
+    const el = line()
+    st().insertNode(el.id, 50, 0)
+    add(300)
+    expect(st().discardNodeInsert(el.id)).toBe(false)
+    expect(current(el.id).points).toHaveLength(4)
+  })
+
+  it('undoes and redoes an insert', () => {
+    const el = line()
+    st().insertNode(el.id, 50, 0)
+    st().undo()
+    expect(current(el.id).points).toHaveLength(3)
+    st().redo()
+    expect(current(el.id).points).toHaveLength(4)
+  })
+})
+
 describe('point deletion', () => {
-  it('Delete with a point selected never removes a two-point line', async () => {
+  it('deletePoint never removes a point of a two-point line', async () => {
     const { createLinear } = await import('../element/factory')
     const { deleteAction } = await import('./actions')
     const line = createLinear('line', 0, 0)
     const el = { ...line, points: [[0, 0], [50, 0]] as typeof line.points, width: 50 }
     st().commitDraft(el)
     st().setPointEdit({ id: el.id, selected: 1 })
+    expect(st().deletePoint()).toBe(false)
+    expect((live()[0] as LinearElement).points).toHaveLength(2)
+    // a stale active node is cleared; the element survives
     deleteAction()
     expect(live()).toHaveLength(1)
-    expect(live()[0].isDeleted).toBe(false)
+    expect(st().pointEdit).toBeNull()
+    deleteAction()
+    expect(live()).toHaveLength(0)
   })
 
   it('a nudge that fired during a gesture is flushed later', () => {
@@ -391,16 +458,16 @@ describe('elbow path type', () => {
     expect(st().pointEdit).toBeNull()
   })
 
-  it('has no rotate, mid or interior point handles', () => {
+  it('has node handles on its corners and no rotate handle', () => {
     setup()
     st().applyStyle({ curve: 'elbow' })
     const arrow = arrowOf()
-    for (const edit of [false, true]) {
-      const kinds = getHandlePositions(arrow, edit, 1).map((h) => h.handle.kind)
-      expect(kinds).toEqual(['point', 'point'])
-    }
+    const kinds = getHandlePositions(arrow, 1).map((h) => h.handle.kind)
+    expect(kinds.slice(0, 2)).toEqual(['point', 'point'])
+    expect(kinds.slice(2).every((k) => k === 'waypoint')).toBe(true)
+    expect(kinds).toHaveLength(arrow.points.length)
     const straight = { ...arrow, elbowed: false }
-    expect(getHandlePositions(straight, false, 1).map((h) => h.handle.kind)).toContain('rotate')
+    expect(getHandlePositions(straight, 1).map((h) => h.handle.kind)).toContain('rotate')
   })
 
   it('ignores point editing and point deletion on elbow arrows only', () => {

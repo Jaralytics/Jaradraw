@@ -160,6 +160,17 @@ export const SHORTCUTS: Shortcut[] = [
     keys: [{ key: 'delete', display: 'Supr' }, { key: 'backspace', display: 'Retroceso' }],
     run: deleteAction,
   },
+  {
+    // Supr / Retroceso already reach it through edit.delete while a node is active
+    id: 'edit.deleteNode',
+    label: 'Eliminar nodo',
+    category: 'Edición',
+    keys: [],
+    chips: () => [['Supr']],
+    run: () => {
+      st().deletePoint()
+    },
+  },
   zorder('front', 'Traer al frente', 'front', true, 'pageup'),
   zorder('forward', 'Subir una capa', 'forward', false, 'pageup'),
   zorder('backward', 'Bajar una capa', 'backward', false, 'pagedown'),
@@ -169,7 +180,7 @@ export const SHORTCUTS: Shortcut[] = [
     label: 'Editar texto de forma o flecha',
     category: 'Diagramas de flujo',
     keys: [{ key: 'enter', display: 'Intro' }],
-    run: () => editSelected(false),
+    run: () => editSelected(),
   },
   {
     id: 'flow.createNode',
@@ -197,13 +208,6 @@ export const SHORTCUTS: Shortcut[] = [
     ],
     when: (e) => isCanvasFocus(e.target) && hasSelectedNode(),
     run: cycleShapeType,
-  },
-  {
-    id: 'edit.editPoints',
-    label: 'Editar puntos de línea o flecha',
-    category: 'Edición',
-    keys: [{ key: 'enter', mod: true, display: 'Intro' }],
-    run: () => editSelected(true),
   },
   {
     id: 'edit.nudge',

@@ -5,7 +5,8 @@ import { bakeAngle, getAbsolutePoints, getBoxCenter, getElementBounds, getElemen
 import type { Vec } from './geometry'
 import { BIND_GAP, isBindTarget, outlinePointToward, pointInsideElement } from './bind'
 import { layoutLabel } from './label'
-import { routeElbow, sideAnchor } from './elbow'
+import { routeElbow, routeElbowVia, sideAnchor } from './elbow'
+import { customDataWith, readWaypoints } from './waypoints'
 import type { ElbowEnd, Heading } from './elbow'
 
 export interface BoundRef {
@@ -248,12 +249,17 @@ export function storedSide(binding: unknown, shape: SceneElement): Heading | und
 const HEADING_VEC: Record<Heading, Vec> = { right: { x: 1, y: 0 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, up: { x: 0, y: -1 } }
 
 /** True when every pinned side of the route points towards the other end. */
-function sidesFaceEachOther(route: { points: Vec[]; endHeading: Heading; startHeading: Heading }, keep: { start?: Heading; end?: Heading }): boolean {
+function sidesFaceEachOther(
+  route: { points: Vec[]; endHeading: Heading; startHeading: Heading },
+  keep: { start?: Heading; end?: Heading },
+  waypoints: readonly Vec[] = [],
+): boolean {
   const first = route.points[0]
   const last = route.points[route.points.length - 1]
   const dot = (a: Vec, b: Vec, h: Heading) => (b.x - a.x) * HEADING_VEC[h].x + (b.y - a.y) * HEADING_VEC[h].y
-  if (keep.start && dot(first, last, route.startHeading) <= 0) return false
-  if (keep.end && dot(last, first, route.endHeading) <= 0) return false
+  // with waypoints, each pinned side must face the waypoint nearest to its end
+  if (keep.start && dot(first, waypoints[0] ?? last, route.startHeading) <= 0) return false
+  if (keep.end && dot(last, waypoints[waypoints.length - 1] ?? first, route.endHeading) <= 0) return false
   return true
 }
 
@@ -307,8 +313,15 @@ export function rerouteElbowArrow(
         start: sShape && !(override && override.start !== undefined) ? storedSide(arrow.startBinding, sShape) : undefined,
         end: eShape && !(override && override.end !== undefined) ? storedSide(arrow.endBinding, eShape) : undefined,
       }
-  const pinned = keep.start || keep.end ? routeElbow(sEnd, eEnd, keep) : null
-  const route = pinned && pinned.clean && sidesFaceEachOther(pinned, keep) ? pinned : routeElbow(sEnd, eEnd, sides)
+  // waypoints are stored relative to x/y; the route is computed in scene coordinates
+  const stored = readWaypoints(base).map(([wx, wy]) => ({ x: base.x + wx, y: base.y + wy }))
+  // a waypoint sitting on an end point is invisible and could never be deleted: drop it
+  const atEnd = (w: Vec) => (near(w.x, first[0]) && near(w.y, first[1])) || (near(w.x, last[0]) && near(w.y, last[1]))
+  const waypoints = stored.filter((w) => !atEnd(w))
+  const pruned = waypoints.length !== stored.length
+  const go = (o?: { start?: Heading; end?: Heading }) => (waypoints.length ? routeElbowVia(sEnd, waypoints, eEnd, o) : routeElbow(sEnd, eEnd, o))
+  const pinned = keep.start || keep.end ? go(keep) : null
+  const route = pinned && pinned.clean && sidesFaceEachOther(pinned, keep, waypoints) ? pinned : go(sides)
   const pts: Vec[] = route.points.map((p) => ({ ...p }))
   // a degenerate route (coincident or non-finite points) is never written
   if (pts.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)) || pts.every((p) => near(p.x, pts[0].x) && near(p.y, pts[0].y))) {
@@ -342,6 +355,7 @@ export function rerouteElbowArrow(
   if (eShape) anchorEnd('end', eShape, route.endHeading, pts.length - 1)
 
   const same =
+    !pruned &&
     bindingsSame &&
     base === arrow &&
     arrow.roundness === null &&
@@ -351,7 +365,9 @@ export function rerouteElbowArrow(
     pts.length === src.length &&
     pts.every((p, i) => near(p.x, src[i][0]) && near(p.y, src[i][1]))
   if (same) return arrow
-  return { ...withAbsolutePoints(base, pts.map((p) => [p.x, p.y] as Point)), ...patch } as LinearElement
+  const out = { ...withAbsolutePoints(base, pts.map((p) => [p.x, p.y] as Point)), ...patch } as LinearElement
+  if (!pruned) return out
+  return { ...out, customData: customDataWith(out, waypoints.map((w) => [w.x - out.x, w.y - out.y] as Point)) }
 }
 
 /** Recomputes an arrow after its shapes or itself changed: elbow arrows are re-routed, others re-snapped. */

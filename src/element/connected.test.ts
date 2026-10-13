@@ -9,7 +9,7 @@ import { elementsInRect } from './group'
 import { parseClipboard, serializeClipboard } from '../scene/clipboard'
 import { cloneElements } from './clone'
 import { normalizeArrowhead } from './arrowhead'
-import { insertMidpoint, removePoint } from './points'
+import { insertNodeAt, removePoint } from './points'
 import { withAbsolutePoints, getElementBox, getBoxCenter, rotatePoint } from './geometry'
 import { hitTestElement } from './hit'
 import { moveElement } from './resize'
@@ -224,7 +224,7 @@ describe('multi-point lines', () => {
 
   it('keeps the invariants after insert, move and delete', () => {
     const base = line()
-    const ins = insertMidpoint(base, 0)
+    const ins = insertNodeAt(base, 60, 10)!.element
     expect(ins.points).toHaveLength(4)
     expect(ins.points[0]).toEqual([0, 0])
     const removed = removePoint(ins, 0)!

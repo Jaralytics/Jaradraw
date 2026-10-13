@@ -86,10 +86,31 @@ export function pathMidpoint(path: readonly Vec2[]): Vec2 {
   return path[path.length - 1]
 }
 
-/** Midpoint of segment `i` as drawn (curve point at t = 0.5 for curved elements). */
-export function segmentMidpoint(points: readonly Point[], i: number, curved: boolean): Vec2 {
-  if (curved) return bezierAt(getCurveSegments(points)[i], 0.5)
-  return { x: (points[i][0] + points[i + 1][0]) / 2, y: (points[i][1] + points[i + 1][1]) / 2 }
+export interface PathHit {
+  /** Segment between points `segment` and `segment + 1` that holds the closest position. */
+  segment: number
+  point: Vec2
+  distance: number
+}
+
+/** Closest position on the drawn path (flattened for curves) to (x, y), in the coordinates of `points`. */
+export function closestPathPoint(points: readonly Point[], curved: boolean, x: number, y: number): PathHit | null {
+  if (points.length < 2) return null
+  const flat = flattenPath(points, curved)
+  const per = curved ? STEPS : 1
+  let best: PathHit | null = null
+  for (let i = 0; i < flat.length - 1; i++) {
+    const a = flat[i]
+    const b = flat[i + 1]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const lenSq = dx * dx + dy * dy
+    const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / lenSq))
+    const point = { x: a.x + t * dx, y: a.y + t * dy }
+    const distance = Math.hypot(x - point.x, y - point.y)
+    if (!best || distance < best.distance) best = { segment: Math.floor(i / per), point, distance }
+  }
+  return best
 }
 
 /**

@@ -351,7 +351,7 @@ function drawSelection(
   ctx: CanvasRenderingContext2D,
   el: SceneElement,
   vp: Viewport,
-  pointEdit: PointEdit | null,
+  activeNode: PointEdit | null,
 ): void {
   ctx.save()
   ctx.strokeStyle = ACCENT
@@ -379,23 +379,21 @@ function drawSelection(
 
   if (!isLinear(el)) strokeCorners(ctx, el, vp)
 
-  for (const h of getHandlePositions(el, pointEdit !== null, vp.zoom)) {
+  for (const h of getHandlePositions(el, vp.zoom)) {
     if (h.handle.kind === 'rotate') {
       drawRotateHandle(ctx, getElementBox(el), el.angle, vp)
       continue
     }
     const s = sceneToScreen(vp, h.x, h.y)
+    const active =
+      (h.handle.kind === 'point' && activeNode?.selected === h.handle.index) ||
+      (h.handle.kind === 'waypoint' && activeNode?.waypoint === h.handle.index)
     ctx.beginPath()
-    if (h.handle.kind === 'mid') {
-      ctx.globalAlpha = 0.7
-      ctx.arc(s.x, s.y, 3, 0, Math.PI * 2)
-    } else if (h.handle.kind === 'point') ctx.arc(s.x, s.y, 5, 0, Math.PI * 2)
+    if (h.handle.kind === 'point' || h.handle.kind === 'waypoint') ctx.arc(s.x, s.y, active ? 6.5 : 5, 0, Math.PI * 2)
     else ctx.rect(s.x - 4, s.y - 4, 8, 8)
-    const active = h.handle.kind === 'point' && pointEdit?.selected === h.handle.index
     ctx.fillStyle = active ? ACCENT : handleFill
     ctx.fill()
     ctx.stroke()
-    ctx.globalAlpha = 1
   }
   ctx.restore()
 }

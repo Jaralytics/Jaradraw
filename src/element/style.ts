@@ -3,6 +3,7 @@ import { measureText } from './text'
 import { isRenderable, isShape, isLinear, isText } from './types'
 import { DEFAULT_STYLE, updateElement } from './factory'
 import type { StyleProps } from './factory'
+import { customDataWith } from './waypoints'
 
 export type Edges = 'sharp' | 'round'
 
@@ -71,13 +72,16 @@ export function curveOf(el: LinearElement): Curve {
 
 /** Patch that applies a curve option to a linear element; lines never elbow. */
 function curvePatch(el: LinearElement, curve: Curve): Record<string, unknown> {
-  if (curve === 'elbow' && el.type === 'arrow') return el.elbowed === true ? {} : { elbowed: true, roundness: null }
+  if (curve === 'elbow' && el.type === 'arrow') {
+    return el.elbowed === true ? {} : { elbowed: true, roundness: null, customData: customDataWith(el, null) }
+  }
   const patch: Record<string, unknown> = { roundness: roundnessFor(el.type, curve === 'curved' ? 'round' : 'sharp') }
   if (el.elbowed === true) {
     patch.elbowed = false
     patch.fixedSegments = null
     patch.startIsSpecial = null
     patch.endIsSpecial = null
+    patch.customData = customDataWith(el, null)
     // a curve keeps the corners as its control points; a straight arrow collapses to its two ends
     if (curve !== 'curved') {
       const last = el.points[el.points.length - 1]

@@ -1,14 +1,18 @@
 import type { LinearElement, Point } from './types'
-import { getAbsolutePoints, withAbsolutePoints } from './geometry'
-import { isCurved, segmentMidpoint } from './path'
+import { bakeAngle, getAbsolutePoints, withAbsolutePoints } from './geometry'
+import { closestPathPoint, isCurved } from './path'
 
-/** Inserts a point at the drawn midpoint of segment `segment` (between points `segment` and `segment + 1`). */
-export function insertMidpoint(el: LinearElement, segment: number): LinearElement {
-  if (segment < 0 || segment >= el.points.length - 1) return el
-  const mid = segmentMidpoint(el.points, segment, isCurved(el))
-  const abs = getAbsolutePoints(el)
-  abs.splice(segment + 1, 0, [el.x + mid.x, el.y + mid.y] as Point)
-  return withAbsolutePoints(el, abs)
+/**
+ * Inserts a node at the closest position of the drawn path to the scene point (x, y).
+ * `index` is the new node's position in the result; null when the element has no path.
+ */
+export function insertNodeAt(el: LinearElement, x: number, y: number): { element: LinearElement; index: number } | null {
+  const base = bakeAngle(el)
+  const hit = closestPathPoint(base.points, isCurved(base), x - base.x, y - base.y)
+  if (!hit) return null
+  const abs = getAbsolutePoints(base)
+  abs.splice(hit.segment + 1, 0, [base.x + hit.point.x, base.y + hit.point.y] as Point)
+  return { element: withAbsolutePoints(base, abs), index: hit.segment + 1 }
 }
 
 /** Removes a point; returns null when the element would drop below two points. */
