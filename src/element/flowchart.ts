@@ -2,7 +2,8 @@ import type { Box, LinearElement, SceneElement, ShapeElement } from './types'
 import { isBoundText, isFrame, isLinear, isShape } from './types'
 import { createLinear, createShape, updateElement } from './factory'
 import { getBoxCenter, getElementBounds, getElementBox, withAbsolutePoints } from './geometry'
-import { bindingTarget, bindArrowEnd, reconcile, recomputeArrow } from './relations'
+import type { Heading } from './elbow'
+import { bindingTarget, bindArrowEnd, reconcile, recomputeArrow, rerouteElbowArrow } from './relations'
 import { roundnessFor, styleForNew } from './style'
 import type { Edges, StyleDefaults } from './style'
 import { snapPointToGrid } from './snap'
@@ -22,6 +23,8 @@ export const DIRECTION_BY_KEY: Record<string, Direction> = {
   arrowup: 'up',
   arrowdown: 'down',
 }
+
+const OPPOSITE: Record<Direction, Heading> = { left: 'right', right: 'left', up: 'down', down: 'up' }
 
 const AXIS: Record<Direction, { x: number; y: number }> = {
   left: { x: -1, y: 0 },
@@ -175,7 +178,7 @@ export function planConnectedNodes(
       width: source.width,
       height: source.height,
     }
-    const made = connectNodes([...out, node], source.id, node.id, defaults, true)
+    const made = connectNodes([...out, node], source.id, node.id, defaults, true, true, dir)
     out = made?.elements ?? [...out, node]
     nodeIds.push(node.id)
     if (made) arrowIds.push(made.arrowId)
@@ -187,6 +190,8 @@ export function planConnectedNodes(
 /**
  * Adds an arrow from node `sourceId` to node `targetId`, bound at both ends. Returns null when
  * either is not a node, or when their boxes overlap (the arrow would have no room) unless allowed.
+ * With `elbow` the arrow is an elbow arrow, routed here because a new arrow is not routed by reconcile;
+ * `dir` pins it to leave the source on the facing side and enter the target on the opposite one.
  */
 export function connectNodes(
   elements: readonly SceneElement[],
@@ -194,6 +199,8 @@ export function connectNodes(
   targetId: string,
   defaults: StyleDefaults,
   allowOverlap = false,
+  elbow = false,
+  dir?: Direction,
 ): { elements: readonly SceneElement[]; arrowId: string } | null {
   const source = elements.find((e) => e.id === sourceId)
   const target = elements.find((e) => e.id === targetId)
@@ -201,8 +208,7 @@ export function connectNodes(
   if (!allowOverlap && overlaps(getElementBounds(source), getElementBounds(target))) return null
   const from = centerOf(source)
   const to = centerOf(target)
-  // connectors stay straight even when "Codo" is the default path type
-  const style = { ...defaults, curve: defaults.curve === 'elbow' ? ('sharp' as const) : defaults.curve }
+  const style = elbow ? { ...defaults, curve: 'elbow' as const } : defaults
   const base = createLinear('arrow', from.x, from.y, styleForNew(style, 'arrow'))
   const arrow = {
     ...withAbsolutePoints(base, [
@@ -214,6 +220,10 @@ export function connectNodes(
   let next: readonly SceneElement[] = [...elements, arrow]
   next = bindArrowEnd(next, arrow.id, 'start', source.id)
   next = bindArrowEnd(next, arrow.id, 'end', target.id)
+  if (elbow) {
+    const found = (id: string) => next.find((e) => e.id === id)
+    next = next.map((e) => (e.id === arrow.id && isLinear(e) ? rerouteElbowArrow(e, found, undefined, dir ? { start: dir, end: OPPOSITE[dir] } : undefined) : e))
+  }
   return { elements: reconcile(elements, next), arrowId: arrow.id }
 }
 

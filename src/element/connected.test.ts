@@ -15,7 +15,7 @@ import { hitTestElement } from './hit'
 import { moveElement } from './resize'
 import { bezierAt, getCurveSegments } from './path'
 import { updateElement } from './factory'
-import { recomputeArrow, rerouteElbowArrow } from './relations'
+import { recomputeArrow, rerouteElbowArrow, storedSide } from './relations'
 import { sideAnchor } from './elbow'
 import type { Heading } from './elbow'
 import { BIND_GAP } from './bind'
@@ -589,5 +589,46 @@ describe('elbow arrows in reconcile', () => {
     expect(pts[pts.length - 1].x).toBeCloseTo(end.x)
     expect(pts[pts.length - 1].y).toBeCloseTo(end.y)
     for (let i = 1; i < pts.length; i++) expect(pts[i].x === pts[i - 1].x || pts[i].y === pts[i - 1].y).toBe(true)
+  })
+
+  it('resolves the stored side in the shape frame and follows its rotation', () => {
+    const wide = { ...rect(0, 0, 300, 60), id: 'w' }
+    const at = (fixedPoint: unknown) => ({ elementId: 'w', fixedPoint })
+    expect(storedSide(at([0.8, 0]), wide)).toBe('up')
+    expect(storedSide(at([0.8, 0]), { ...wide, angle: Math.PI / 2 })).toBe('right')
+    expect(storedSide(at([1, 0.5]), wide)).toBe('right')
+    expect(storedSide(at([0.5, 1]), wide)).toBe('down')
+    expect(storedSide(at([Number.NaN, 0.5]), wide)).toBeUndefined()
+    expect(storedSide(at(['0.8', 0]), wide)).toBeUndefined()
+    expect(storedSide(at([0.8]), wide)).toBeUndefined()
+    expect(storedSide({ elementId: 'other', fixedPoint: [1, 0.5] }, wide)).toBeUndefined()
+  })
+
+  it('falls back to automatic sides for malformed fixedPoint values without throwing', () => {
+    const { a, b, id, out } = setup()
+    const arrow = arrowOf(out, id)
+    const auto = rerouteElbowArrow(
+      { ...arrow, startBinding: { elementId: a.id, fixedPoint: null }, endBinding: { elementId: b.id, fixedPoint: null } } as LinearElement,
+      lookupIn(out),
+    )
+    for (const fixedPoint of [[Number.NaN, 0.5], ['x', 0], [0.5]]) {
+      const bad = { ...arrow, startBinding: { elementId: a.id, fixedPoint }, endBinding: { elementId: b.id, fixedPoint } } as LinearElement
+      const r = rerouteElbowArrow(bad, lookupIn(out))
+      expect(r.points).toEqual(auto.points)
+    }
+  })
+
+  it('drops stored sides that face away from the other shape and then stays stable', () => {
+    const { b, id, out } = setup()
+    const moved = reconcile(out, patchOf(out, b.id, { x: -300, y: 300 }))
+    const arrow = arrowOf(moved, id)
+    const p = abs(arrow)
+    expect(p[0].x).toBeLessThanOrEqual(100)
+    expect(rerouteElbowArrow(arrow, lookupIn(moved))).toBe(arrow)
+    const other = rect(900, 900, 50, 50)
+    const base = [...moved, other]
+    const again = reconcile(base, patchOf(base, other.id, { x: 950 }))
+    expect(arrowOf(again, id)).toBe(arrow)
+    expect(recomputeArrow(arrow, lookupIn(moved))).toBe(arrow)
   })
 })

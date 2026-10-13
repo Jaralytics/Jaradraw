@@ -16,6 +16,9 @@ export interface ElbowRoute {
   points: Vec[]
   startHeading: Heading
   endHeading: Heading
+  bends: number
+  /** No crossing, no reversal and at most two bends. */
+  clean: boolean
 }
 
 export const ELBOW_PADDING = 24
@@ -36,6 +39,7 @@ const OPPOSITE: Record<Heading, Heading> = { right: 'left', down: 'up', left: 'r
 
 interface Candidate {
   score: number
+  flawed: boolean
   points: Vec[]
   si: number
   ei: number
@@ -99,7 +103,7 @@ function segmentCrossesBox(a: Vec, b: Vec, box: Bounds): boolean {
   return minX > box[0] && minX < box[2] && Math.min(maxY, box[3]) - Math.max(minY, box[1]) > EPS
 }
 
-function scorePath(raw: readonly Vec[], solids: readonly Bounds[]): { score: number; points: Vec[] } {
+function scorePath(raw: readonly Vec[], solids: readonly Bounds[]): { score: number; flawed: boolean; points: Vec[] } {
   const path = dedupe(raw)
   let score = 0
   let prev: Vec | null = null
@@ -114,7 +118,7 @@ function scorePath(raw: readonly Vec[], solids: readonly Bounds[]): { score: num
   }
   const points = simplify(path)
   score += BEND_PENALTY * Math.max(0, points.length - 2)
-  return { score, points }
+  return { score, flawed: score >= CROSS_PENALTY, points }
 }
 
 /** Stub length: half the gap when the boxes are apart on that axis, a fixed floor when they touch or overlap. */
@@ -122,10 +126,19 @@ function padFor(gap: number): number {
   return gap > 0 ? Math.min(ELBOW_PADDING, gap / 2) : MIN_PADDING
 }
 
+/** Length of the shorter end segment; a larger value puts the bends away from the shapes. */
+function balanceOf(points: readonly Vec[]): number {
+  const seg = (a: Vec, b: Vec) => Math.abs(b.x - a.x) + Math.abs(b.y - a.y)
+  const n = points.length
+  return Math.min(seg(points[0], points[1]), seg(points[n - 2], points[n - 1]))
+}
+
 function isBetter(c: Candidate, best: Candidate | null): boolean {
   if (!best) return true
   if (Math.abs(c.score - best.score) > SCORE_EPS) return c.score < best.score
   if (c.points.length !== best.points.length) return c.points.length < best.points.length
+  const balance = balanceOf(c.points) - balanceOf(best.points)
+  if (Math.abs(balance) > SCORE_EPS) return balance > 0
   if (c.si !== best.si) return c.si < best.si
   return c.ei < best.ei
 }
@@ -137,10 +150,11 @@ function stubFor(box: Bounds | null, point: Vec, h: Heading, padX: number, padY:
   return { anchor, tip: { x: anchor.x + DIRS[h].x * pad, y: anchor.y + DIRS[h].y * pad } }
 }
 
-export function routeElbow(start: ElbowEnd, end: ElbowEnd): ElbowRoute {
+/** `sides` pins the side a bound end uses (the side of its box the arrow leaves from or arrives at). */
+export function routeElbow(start: ElbowEnd, end: ElbowEnd, sides: { start?: Heading; end?: Heading } = {}): ElbowRoute {
   const sp = start.point
   const ep = end.point
-  const fallback: ElbowRoute = { points: [{ ...sp }, { ...ep }], startHeading: 'right', endHeading: 'left' }
+  const fallback: ElbowRoute = { points: [{ ...sp }, { ...ep }], startHeading: 'right', endHeading: 'left', bends: 0, clean: true }
   if (!start.box && !end.box && samePoint(sp, ep)) return fallback
 
   const sBox: Bounds = start.box ?? [sp.x, sp.y, sp.x, sp.y]
@@ -156,8 +170,9 @@ export function routeElbow(start: ElbowEnd, end: ElbowEnd): ElbowRoute {
   ]
 
   let best: Candidate | null = null
-  const sIdx = start.box ? [0, 1, 2, 3] : [0]
-  const eIdx = end.box ? [0, 1, 2, 3] : [0]
+  const sideIdx = (box: Bounds | null, pinned?: Heading) => (!box ? [0] : pinned ? [HEADINGS.indexOf(pinned)] : [0, 1, 2, 3])
+  const sIdx = sideIdx(start.box, sides.start)
+  const eIdx = sideIdx(end.box, sides.end)
   for (const si of sIdx) {
     const s = stubFor(start.box, sp, HEADINGS[si], padX, padY)
     for (const ei of eIdx) {
@@ -185,11 +200,13 @@ export function routeElbow(start: ElbowEnd, end: ElbowEnd): ElbowRoute {
     }
   }
 
-  if (!best) return fallback
+  if (!best) return { ...fallback, clean: false }
   const points = best.points
   return {
     points,
     startHeading: headingOf(points[0], points[1]),
     endHeading: OPPOSITE[headingOf(points[points.length - 2], points[points.length - 1])],
+    bends: points.length - 2,
+    clean: !best.flawed && points.length - 2 <= 2,
   }
 }

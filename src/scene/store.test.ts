@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createLinear, createShape } from '../element/factory'
-import { withAbsolutePoints } from '../element/geometry'
+import { getElementBounds, withAbsolutePoints } from '../element/geometry'
 import { createLabel } from '../element/label'
 import { attachLabel, bindArrowEnd, rerouteElbowArrow } from '../element/relations'
 import { getHandlePositions } from '../element/handles'
 import { moveElement } from '../element/resize'
+import { routeElbow } from '../element/elbow'
 import { outlinePointToward } from '../element/bind'
 import { DEFAULT_STYLE_DEFAULTS, styleForNew } from '../element/style'
 import type { LinearElement, SceneElement } from '../element/types'
@@ -428,5 +429,38 @@ describe('elbow path type', () => {
     st().replaceElements([moveElement(detached, 50, 20)])
     expect(arrowOf().points).toEqual(before.points)
     expect(arrowOf().x).toBeCloseTo(before.x + 50)
+  })
+})
+
+describe('elbow sides after a change of binding', () => {
+  const rectAt = (x: number, y: number) => ({ ...createShape('rectangle', x, y), width: 100, height: 50 })
+  const arrowOf = () => live().find((e) => e.type === 'arrow') as LinearElement
+  const absPoints = (a: LinearElement) => a.points.map(([x, y]) => ({ x: a.x + x, y: a.y + y }))
+
+  it('chooses automatic sides for a re-bound end and when switching a straight arrow to Codo', () => {
+    useStore.setState({ defaults: DEFAULT_STYLE_DEFAULTS })
+    const a = rectAt(0, 0)
+    const b = rectAt(300, 0)
+    const c = rectAt(0, 300)
+    for (const el of [a, b, c]) st().commitDraft(el)
+    const arrow = withAbsolutePoints(createLinear('arrow', 100, 25), [[100, 25], [300, 25]])
+    st().commitDraft(arrow, { start: a.id, end: b.id })
+    expect((arrowOf().endBinding as { fixedPoint: unknown }).fixedPoint).toBeNull()
+    st().applyStyle({ curve: 'elbow' })
+    const auto = routeElbow(
+      { point: { x: 0, y: 0 }, box: getElementBounds(a) },
+      { point: { x: 0, y: 0 }, box: getElementBounds(b) },
+    )
+    const first = absPoints(arrowOf())
+    expect(first[0].x).toBeGreaterThan(100 - 1)
+    expect(auto.startHeading).toBe('right')
+    st().bindEnds(arrow.id, { end: c.id })
+    const rebound = arrowOf()
+    expect((rebound.endBinding as { elementId: string }).elementId).toBe(c.id)
+    const p = absPoints(rebound)
+    expect(p.every((q, i) => i === 0 || q.x === p[i - 1].x || q.y === p[i - 1].y)).toBe(true)
+    // the re-bound end arrives at the top of c, whichever side b had
+    expect(p[p.length - 1].x).toBeCloseTo(50)
+    expect(p[p.length - 1].y).toBeCloseTo(296)
   })
 })

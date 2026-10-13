@@ -851,7 +851,7 @@ export const useStore = create<State>()((set, get) => {
 
     connectNodes: (sourceId, targetId) => {
       const { elements, defaults } = get()
-      const made = connectNodes(elements, sourceId, targetId, defaults)
+      const made = connectNodes(elements, sourceId, targetId, defaults, false, true)
       if (made) set({ elements: made.elements })
     },
 

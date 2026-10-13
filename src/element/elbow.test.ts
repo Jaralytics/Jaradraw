@@ -346,3 +346,36 @@ describe('routeElbow properties', () => {
     }
   })
 })
+
+describe('routeElbow balance and flags', () => {
+  it('puts the bend in the middle of the gap', () => {
+    const down = routeElbow(bound([560, 120, 700, 190]), bound([380, 290, 520, 360]), { start: 'down', end: 'up' })
+    expect(down.points).toEqual([
+      { x: 630, y: 190 },
+      { x: 630, y: 240 },
+      { x: 450, y: 240 },
+      { x: 450, y: 290 },
+    ])
+    const right = routeElbow(bound([300, 300, 440, 370]), bound([540, 500, 680, 570]))
+    expect(right.points).toEqual([
+      { x: 440, y: 335 },
+      { x: 490, y: 335 },
+      { x: 490, y: 535 },
+      { x: 540, y: 535 },
+    ])
+  })
+
+  it('reports bends and whether the route is clean', () => {
+    const z = routeElbow(bound([0, 0, 100, 60]), bound([300, 8, 400, 68]))
+    expect(z.bends).toBe(2)
+    expect(z.clean).toBe(true)
+    const pinned = routeElbow(bound([0, 0, 100, 60]), bound([0, -200, 100, -140]), { start: 'down', end: 'down' })
+    expect(pinned.clean).toBe(false)
+  })
+
+  it('pins the sides of bound ends', () => {
+    const r = routeElbow(bound([0, 0, 100, 60]), bound([300, 200, 400, 260]), { start: 'down', end: 'left' })
+    expect(r.startHeading).toBe('down')
+    expect(r.endHeading).toBe('left')
+  })
+})

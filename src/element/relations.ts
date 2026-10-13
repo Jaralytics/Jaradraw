@@ -231,6 +231,32 @@ export function recomputeBoundEnds(
 
 const near = (a: number, b: number) => Math.abs(a - b) < EPS
 
+/** Side of the shape a binding's fixedPoint sits on (world frame), when the binding targets that shape. */
+export function storedSide(binding: unknown, shape: SceneElement): Heading | undefined {
+  if (!isBinding(binding) || binding.elementId !== shape.id) return undefined
+  const f = binding.fixedPoint
+  if (!f || !Number.isFinite(f[0]) || !Number.isFinite(f[1])) return undefined
+  // side in the shape's own frame by normalised offsets, then turned by its angle
+  const dx = f[0] - 0.5
+  const dy = f[1] - 0.5
+  const local = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx) || 1, y: 0 } : { x: 0, y: Math.sign(dy) }
+  const v = rotatePoint(local.x, local.y, 0, 0, shape.angle)
+  if (Math.abs(v.x) >= Math.abs(v.y)) return v.x >= 0 ? 'right' : 'left'
+  return v.y >= 0 ? 'down' : 'up'
+}
+
+const HEADING_VEC: Record<Heading, Vec> = { right: { x: 1, y: 0 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, up: { x: 0, y: -1 } }
+
+/** True when every pinned side of the route points towards the other end. */
+function sidesFaceEachOther(route: { points: Vec[]; endHeading: Heading; startHeading: Heading }, keep: { start?: Heading; end?: Heading }): boolean {
+  const first = route.points[0]
+  const last = route.points[route.points.length - 1]
+  const dot = (a: Vec, b: Vec, h: Heading) => (b.x - a.x) * HEADING_VEC[h].x + (b.y - a.y) * HEADING_VEC[h].y
+  if (keep.start && dot(first, last, route.startHeading) <= 0) return false
+  if (keep.end && dot(last, first, route.endHeading) <= 0) return false
+  return true
+}
+
 /** Anchor normalised in the shape's unrotated box, clamped to 0..1; exactly 0.5 is nudged as Excalidraw does. */
 function fixedPointOf(shape: SceneElement, p: Vec): [number, number] {
   const box = getElementBox(shape)
@@ -253,6 +279,7 @@ export function rerouteElbowArrow(
   arrow: LinearElement,
   lookup: (id: string) => SceneElement | undefined,
   override?: { start?: string | null; end?: string | null },
+  sides?: { start?: Heading; end?: Heading },
 ): LinearElement {
   const base = bakeAngle(arrow)
   const src = getAbsolutePoints(base)
@@ -271,7 +298,17 @@ export function rerouteElbowArrow(
     point: { x: p[0], y: p[1] },
     box: shape ? getElementBounds(shape) : null,
   })
-  const route = routeElbow(endOf(sShape, first), endOf(eShape, last))
+  const sEnd = endOf(sShape, first)
+  const eEnd = endOf(eShape, last)
+  // an arrow keeps its stored exit and entry sides while the route stays clean and the sides face each other
+  const keep = sides
+    ? {}
+    : {
+        start: sShape && !(override && override.start !== undefined) ? storedSide(arrow.startBinding, sShape) : undefined,
+        end: eShape && !(override && override.end !== undefined) ? storedSide(arrow.endBinding, eShape) : undefined,
+      }
+  const pinned = keep.start || keep.end ? routeElbow(sEnd, eEnd, keep) : null
+  const route = pinned && pinned.clean && sidesFaceEachOther(pinned, keep) ? pinned : routeElbow(sEnd, eEnd, sides)
   const pts: Vec[] = route.points.map((p) => ({ ...p }))
   // a degenerate route (coincident or non-finite points) is never written
   if (pts.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)) || pts.every((p) => near(p.x, pts[0].x) && near(p.y, pts[0].y))) {

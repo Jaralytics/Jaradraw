@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createShape } from '../element/factory'
 import { createLabel } from '../element/label'
-import { attachLabel, bindingTarget, getBoundRefs, getLabel } from '../element/relations'
+import { attachLabel, bindingTarget, getBoundRefs, getLabel, rerouteElbowArrow } from '../element/relations'
+import { outlinePointToward } from '../element/bind'
 import {
   FLOW_GAP,
   MAX_FLOW_COUNT,
@@ -294,7 +295,9 @@ describe('store actions', () => {
     expect(getBoundRefs(cur).filter((r) => r.type === 'arrow')).toHaveLength(1)
     const arrowAfter = live().find((e) => e.type === 'arrow') as LinearElement
     expect(bindingTarget(arrowAfter.startBinding)).toBe(a.id)
-    expect([arrowAfter.x, arrowAfter.y]).not.toEqual([arrowBefore.x, arrowBefore.y])
+    // the side midpoints of the three shapes coincide, so a sticky route keeps its points
+    expect(arrowAfter.elbowed).toBe(true)
+    expect(arrowAfter.points).toEqual(arrowBefore.points)
     st().cycleNodeTypes(false)
     cur = live().find((e) => e.id === a.id)!
     expect(cur.type).toBe('ellipse')
@@ -534,5 +537,155 @@ describe('connectNodes', () => {
     expect(connectNodes([a, close], a.id, close.id, DEFAULT_STYLE_DEFAULTS)).toBeNull()
     expect(connectNodes([a], a.id, a.id, DEFAULT_STYLE_DEFAULTS)).toBeNull()
     expect(connectNodes([a, locked], a.id, locked.id, DEFAULT_STYLE_DEFAULTS)).toBeNull()
+  })
+})
+
+describe('elbow connectors', () => {
+  const lookup = (els: readonly SceneElement[]) => (id: string) => els.find((e) => e.id === id)
+  const pts = (a: LinearElement) => a.points.map(([x, y]) => ({ x: a.x + x, y: a.y + y }))
+  const aligned = (a: LinearElement) => pts(a).every((p, i, all) => i === 0 || p.x === all[i - 1].x || p.y === all[i - 1].y)
+  const onOutline = (shape: SceneElement, p: { x: number; y: number }) => {
+    const q = outlinePointToward(shape, p)
+    return Math.hypot(q.x - p.x, q.y - p.y) < 1e-6
+  }
+  const crosses = (a: LinearElement, shape: SceneElement) => {
+    const [x1, y1, x2, y2] = getElementBounds(shape)
+    const p = pts(a)
+    return p.some((q, i) => {
+      if (i === 0) return false
+      const r = p[i - 1]
+      const ox = Math.min(Math.max(q.x, r.x), x2) - Math.max(Math.min(q.x, r.x), x1)
+      const oy = Math.min(Math.max(q.y, r.y), y2) - Math.max(Math.min(q.y, r.y), y1)
+      if (ox > 1e-6 && oy > 1e-6) return true
+      if (q.y === r.y) return q.y > y1 && q.y < y2 && ox > 1e-6
+      return q.x > x1 && q.x < x2 && oy > 1e-6
+    })
+  }
+
+  it('creates elbow connectors whatever the style panel default is', () => {
+    for (const curve of ['sharp', 'curved', 'elbow'] as const) {
+      const s = node(0, 0)
+      const out = planConnectedNodes([s], s, 'right', 1, { ...DEFAULT_STYLE_DEFAULTS, curve }, null)
+      const arrow = out.elements.find((e) => e.id === out.arrowIds[0]) as LinearElement
+      const target = out.elements.find((e) => e.id === out.nodeIds[0])!
+      expect(arrow.elbowed).toBe(true)
+      expect(arrow.roundness).toBeNull()
+      expect(bindingTarget(arrow.startBinding)).toBe(s.id)
+      expect(bindingTarget(arrow.endBinding)).toBe(target.id)
+      expect(arrow.points).toHaveLength(2)
+      expect(aligned(arrow)).toBe(true)
+      expect(onOutline(s, pts(arrow)[0])).toBe(true)
+      expect(onOutline(target, pts(arrow)[1])).toBe(true)
+      expect(rerouteElbowArrow(arrow, lookup(out.elements))).toBe(arrow)
+    }
+  })
+
+  it('routes parallel siblings independently in every direction', () => {
+    for (const dir of ['left', 'right', 'up', 'down'] as const) {
+      for (const n of [2, 3, 9]) {
+        const s = node(0, 0)
+        const out = planConnectedNodes([s], s, dir, n, DEFAULT_STYLE_DEFAULTS, null)
+        const kids = out.nodeIds.map((id) => out.elements.find((e) => e.id === id)!)
+        out.arrowIds.forEach((id, i) => {
+          const arrow = out.elements.find((e) => e.id === id) as LinearElement
+          expect(arrow.elbowed).toBe(true)
+          expect(aligned(arrow)).toBe(true)
+          expect(bindingTarget(arrow.startBinding)).toBe(s.id)
+          expect(bindingTarget(arrow.endBinding)).toBe(kids[i].id)
+          expect(onOutline(s, pts(arrow)[0])).toBe(true)
+          expect(onOutline(kids[i], pts(arrow).at(-1)!)).toBe(true)
+          expect(crosses(arrow, s)).toBe(false)
+          for (const k of kids) expect(crosses(arrow, k)).toBe(false)
+        })
+      }
+    }
+  })
+
+  it('connects a Ctrl+drag copy with a routed elbow arrow and keeps plain connectNodes straight', () => {
+    const a = seed(node(0, 0))
+    const b = seed(node(400, 200))
+    st().connectNodes(a.id, b.id)
+    const arrow = live().find((e) => e.type === 'arrow') as LinearElement
+    expect(arrow.elbowed).toBe(true)
+    expect(aligned(arrow)).toBe(true)
+    expect(arrow.points.length).toBeGreaterThan(2)
+    expect(bindingTarget(arrow.startBinding)).toBe(a.id)
+    expect(bindingTarget(arrow.endBinding)).toBe(b.id)
+    const plain = connectNodes([a, b], a.id, b.id, DEFAULT_STYLE_DEFAULTS)!
+    const straight = plain.elements.find((e) => e.id === plain.arrowId) as LinearElement
+    expect(straight.elbowed).not.toBe(true)
+    expect(straight.points).toHaveLength(2)
+  })
+})
+
+describe('elbow connectors through the store', () => {
+  it('inserts the previewed routes unchanged', () => {
+    const s = seed(node(0, 0))
+    st().setSelection([s.id])
+    st().previewConnectedNodes('down', VIEW)
+    st().previewConnectedNodes('down', VIEW)
+    st().previewConnectedNodes('down', VIEW)
+    const planned = st().flowPreview!.plan.elements.filter((e) => e.type === 'arrow') as LinearElement[]
+    st().commitFlowPreview(VIEW)
+    const arrows = live().filter((e) => e.type === 'arrow') as LinearElement[]
+    expect(arrows).toHaveLength(3)
+    for (const a of arrows) {
+      const p = planned.find((x) => x.id === a.id)!
+      expect(a.points).toEqual(p.points)
+      expect(a.x).toBe(p.x)
+      expect(a.y).toBe(p.y)
+    }
+  })
+})
+
+describe('sticky elbow sides', () => {
+  const pts = (a: LinearElement) => a.points.map(([x, y]) => ({ x: a.x + x, y: a.y + y }))
+  const aligned = (a: LinearElement) => pts(a).every((p, i, all) => i === 0 || p.x === all[i - 1].x || p.y === all[i - 1].y)
+  const crosses = (a: LinearElement, shape: SceneElement) => {
+    const [x1, y1, x2, y2] = getElementBounds(shape)
+    const p = pts(a)
+    return p.some((q, i) => {
+      if (i === 0) return false
+      const r = p[i - 1]
+      const ox = Math.min(Math.max(q.x, r.x), x2) - Math.max(Math.min(q.x, r.x), x1)
+      const oy = Math.min(Math.max(q.y, r.y), y2) - Math.max(Math.min(q.y, r.y), y1)
+      if (ox > 1e-6 && oy > 1e-6) return true
+      if (q.y === r.y) return q.y > y1 && q.y < y2 && ox > 1e-6
+      return q.x > x1 && q.x < x2 && oy > 1e-6
+    })
+  }
+  const arrowTo = (id: string) =>
+    live().find((e) => e.type === 'arrow' && bindingTarget((e as LinearElement).endBinding) === id) as LinearElement
+
+  function threeBelow() {
+    const origin = seed(node(560, 120, 'rectangle', 140, 70))
+    st().setSelection([origin.id])
+    flow('down', 3)
+    const kids = live().filter((e) => e.id !== origin.id && e.type === 'rectangle').sort((a, b) => a.x - b.x)
+    return { origin, left: kids[0] }
+  }
+
+  it('keeps the exit and entry sides when a sibling is moved', () => {
+    const { origin, left } = threeBelow()
+    st().replaceElements([{ ...left, x: left.x - 30, y: left.y + 40 }])
+    const moved = live().find((e) => e.id === left.id)!
+    const arrow = arrowTo(left.id)
+    const p = pts(arrow)
+    expect(aligned(arrow)).toBe(true)
+    expect(p[0].y).toBeCloseTo(origin.y + origin.height + 4)
+    expect(p[p.length - 1].y).toBeCloseTo(moved.y - 4)
+    expect(bindingTarget(arrow.startBinding)).toBe(origin.id)
+    expect(rerouteElbowArrow(arrow, (id) => st().elements.find((e) => e.id === id))).toBe(arrow)
+  })
+
+  it('picks new sides when the stored ones would give an unclean route', () => {
+    const { origin, left } = threeBelow()
+    st().replaceElements([{ ...left, y: origin.y - 250 }])
+    const moved = live().find((e) => e.id === left.id)!
+    const arrow = arrowTo(left.id)
+    expect(aligned(arrow)).toBe(true)
+    expect(crosses(arrow, origin)).toBe(false)
+    expect(crosses(arrow, moved)).toBe(false)
+    expect(pts(arrow)[0].y).toBeLessThan(origin.y + origin.height)
   })
 })
