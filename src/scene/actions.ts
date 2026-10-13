@@ -77,7 +77,7 @@ export function commitConnectedNodes(): void {
   st().commitFlowPreview(viewSize())
 }
 
-/** Alt+Arrow: move the selection along the arrows to the connected node in that direction. */
+/** Alt+Shift+Arrow: move the selection along the arrows to the connected node in that direction. */
 export function goToConnectedNode(e?: KeyboardEvent): void {
   const dir = e ? DIRECTION_BY_KEY[e.key.toLowerCase()] : undefined
   if (dir) st().selectConnected(dir, viewSize())

@@ -24,7 +24,7 @@ Fase 1
 Fase 2
 - Deshacer y rehacer (una entrada por gesto, hasta 200 pasos; el historial no se guarda).
 - Selección múltiple: Mayús + clic, selección por recuadro, Ctrl+A. Mover y escalar proporcionalmente el grupo desde las esquinas.
-- Duplicar (Ctrl+D, o Ctrl/Alt + arrastrar: el original queda en su sitio y la copia sigue al cursor, con guías activas; con Ctrl y una sola figura, la copia queda unida al original por una flecha enlazada), copiar, cortar y pegar con el portapapeles del sistema en formato `excalidraw/clipboard`, compatible con excalidraw.com. Pegar texto plano crea un elemento de texto.
+- Duplicar (Mayús+D, o Ctrl/Alt + arrastrar: el original queda en su sitio y la copia sigue al cursor, con guías activas; con Ctrl y una sola figura, la copia queda unida al original por una flecha enlazada), copiar, cortar y pegar con el portapapeles del sistema en formato `excalidraw/clipboard`, compatible con excalidraw.com. Pegar texto plano crea un elemento de texto.
 - Orden de capas, movimiento con flechas del teclado.
 - Panel de estilo (solo propiedades, a la izquierda): secciones plegables Color, Trazo, Texto y Flecha (el estado se recuerda), con una fila de 32 px por propiedad y solo los controles que afectan al tipo de elemento seleccionado. El color personalizado es el botón con "+"; las puntas de flecha se eligen en dos botones con menú. Con varios elementos marca con * los valores que difieren.
 - Barra de acciones contextual (bajo la barra de herramientas, solo con selección): duplicar, eliminar, orden de capas, agrupar/desagrupar, voltear, editar puntos, bloquear, añadir a la biblioteca y menú Alinear. Con una selección bloqueada solo muestra desbloquear.
@@ -41,18 +41,18 @@ Fase 3: diagramas conectados
 
 Fase 4: organización y precisión
 - Rotación: tirador sobre la selección; Mayús ajusta a pasos de 15 grados. Con varias selecciones rotan alrededor del centro común. Las líneas y flechas incorporan la rotación a sus puntos (su `angle` queda en 0).
-- Grupos: Ctrl+G agrupa y Ctrl+Mayús+G desagrupa (`groupIds` de interior a exterior). Un clic selecciona el grupo exterior; doble clic entra en el grupo para elegir miembros; Esc o clic fuera salen. El recuadro solo selecciona grupos completos.
-- Bloqueo (Ctrl+Mayús+L): se puede seleccionar, pero no mover, editar, estilizar, borrar ni borrar con el borrador. La barra de acciones solo ofrece "Desbloquear".
+- Grupos: Mayús+G agrupa y Mayús+U desagrupa (`groupIds` de interior a exterior). Un clic selecciona el grupo exterior; doble clic entra en el grupo para elegir miembros; Esc o clic fuera salen. El recuadro solo selecciona grupos completos.
+- Bloqueo (Mayús+L): se puede seleccionar, pero no mover, editar, estilizar, borrar ni borrar con el borrador. La barra de acciones solo ofrece "Desbloquear".
 - Alinear y distribuir desde el menú Alinear de la barra de acciones (con rectángulos girados); Voltear horizontal y vertical (Mayús+H, Mayús+V).
-- Cuadrícula (G o Ctrl+') y guías inteligentes (Alt+S, ver abajo), con botones junto al zoom. Ctrl suspende ambos al arrastrar. La cuadrícula se guarda en `appState` (`gridSize`, `gridStep`, `gridModeEnabled`) y no se exporta al PNG.
+- Cuadrícula (G o Ctrl+') y guías inteligentes (Mayús+S, ver abajo), con botones junto al zoom. Ctrl suspende ambos al arrastrar. La cuadrícula se guarda en `appState` (`gridSize`, `gridStep`, `gridModeEnabled`) y no se exporta al PNG.
 - Texto: tamaño (S 16, M 20, L 28, XL 36) y alineación (izquierda, centro, derecha) en el panel de estilo, para texto libre, etiquetas y contenedores con etiqueta; se usan como valores por defecto del texto nuevo.
 - Lápiz (P) con `perfect-freehand` y borrador (E).
 
 Fase 5: contenido y exportación
 - Imágenes (PNG, JPEG, GIF, WebP, SVG): botón de la barra o tecla 9 (elige archivos y se colocan donde hagas clic), pegar desde el portapapeles o arrastrar archivos al lienzo (se insertan en el punto de soltado). Las imágenes de más de 2000 px por lado se reducen al insertarlas y se muestran ajustadas a la mitad de la ventana. Mantienen la proporción al redimensionar desde cualquier tirador (Mayús la libera), giran, se voltean (`scale` negativo), se agrupan, bloquean, duplican, copian (los datos viajan en `files` del portapapeles), ordenan, borran, exportan y admiten flechas enlazadas. Mientras falta el archivo se dibuja un cuadro neutro. El identificador es el SHA-1 de los bytes, así que una misma imagen se guarda una sola vez.
-- Exportar imagen (Ctrl+Mayús+E o menú Archivo): PNG (1x, 2x, 3x) o SVG, con o sin fondo, solo la selección (un marco seleccionado se exporta con sus hijos y recortado), vista previa, Descargar y Copiar al portapapeles (PNG). La opción «Incluir escena para poder reabrirla» incrusta la escena (PNG: fragmento `tEXt` con clave `application/vnd.excalidraw+json`; SVG: carga útil en base64 dentro de `<metadata>`). Abrir y arrastrar aceptan `.excalidraw`, `.json`, PNG y SVG: si traen escena incrustada se abre la escena (con confirmación si el dibujo actual no está vacío); si no, se inserta la imagen. La exportación siempre usa colores claros.
+- Exportar imagen (Mayús+E o menú Archivo): PNG (1x, 2x, 3x) o SVG, con o sin fondo, solo la selección (un marco seleccionado se exporta con sus hijos y recortado), vista previa, Descargar y Copiar al portapapeles (PNG). La opción «Incluir escena para poder reabrirla» incrusta la escena (PNG: fragmento `tEXt` con clave `application/vnd.excalidraw+json`; SVG: carga útil en base64 dentro de `<metadata>`). Abrir y arrastrar aceptan `.excalidraw`, `.json`, PNG y SVG: si traen escena incrustada se abre la escena (con confirmación si el dibujo actual no está vacío); si no, se inserta la imagen. La exportación siempre usa colores claros.
 - Modo oscuro: Archivo > Tema claro, oscuro o del sistema (por defecto, el del sistema). Se guarda como preferencia del usuario en `localStorage` (`jaradraw:theme`), nunca en el archivo. Los colores guardados no cambian: al dibujar se transforman con el equivalente a `invert(93%) hue-rotate(180deg)` (las imágenes no se transforman).
-- Biblioteca: botón de la barra. «Añadir a la biblioteca» (barra de acciones o Ctrl+Mayús+B) guarda la selección; un clic en una miniatura inserta una copia en el centro de la vista (un solo paso de deshacer); cada elemento tiene su botón de borrar. Importar y exportar en formato `.excalidrawlib` (versión 2; también se lee la versión 1).
+- Biblioteca: botón de la barra. «Añadir a la biblioteca» (barra de acciones o Mayús+B) guarda la selección; un clic en una miniatura inserta una copia en el centro de la vista (un solo paso de deshacer); cada elemento tiene su botón de borrar. Importar y exportar en formato `.excalidrawlib` (versión 2; también se lee la versión 1).
 - Marcos (tecla F): arrastra para crear; el nombre (por defecto «Marco») se edita con doble clic, Intro o desde la selección. Se seleccionan por el borde o el nombre, no por el interior. Los hijos (`frameId`) se recortan al marco al dibujar y exportar; al terminar un movimiento, redimensionado, giro o creación, un elemento (o un grupo entero, o una etiqueta con su contenedor) cuyo centro queda dentro de un marco pasa a ser su hijo. Mover, duplicar, copiar y girar un marco arrastra a sus hijos; borrar un marco libera a los hijos; redimensionarlo no escala a los hijos pero recalcula la pertenencia.
 
 ## Diagramas de flujo con el teclado
@@ -60,7 +60,7 @@ Fase 5: contenido y exportación
 Con una figura (rectángulo, elipse o rombo, no bloqueada) seleccionada se puede construir un diagrama sin ratón. Secuencia típica: dibuja un rectángulo, luego `Intro`, escribe «Inicio», `Esc`, `Ctrl+→`, `Intro`, escribe «Validar», `Esc`, `Tab` (pasa a rombo), `Ctrl+↓`, y así sucesivamente.
 
 - Mantén `Ctrl` (Cmd en macOS) y pulsa una flecha: aparece una vista previa semitransparente (50 %) de una figura del mismo tipo, tamaño y estilo (sin el texto), a 100 px de distancia en esa dirección, con su flecha enlazada. No se añade nada a la escena hasta soltar `Ctrl`: entonces se insertan figuras y flechas como un solo paso de deshacer, la figura más cercana al eje queda seleccionada y, si hace falta, se desplaza el lienzo (sin cambiar el zoom) para mostrarla. Mientras sigas con `Ctrl` pulsado, repetir la misma flecha añade un nodo más (hasta 9) como hijo del origen, cada uno con su flecha, en paralelo: lado a lado en perpendicular, a la misma distancia, separados por el tamaño de la figura más 40 px y centrados en el eje del origen. Con la cuadrícula activa se ajustan a ella. Si algún hueco centrado está ocupado, se rellenan los huecos libres en orden alterno (en el eje, a un lado, al otro, más lejos), de modo que volver al origen y repetir la dirección crea ramas. Pulsar otra flecha descarta lo pendiente y empieza de nuevo con un nodo en la nueva dirección. `Esc`, un clic, perder el foco de la ventana, ocultar la página o cualquier otra tecla descartan la vista previa sin insertar nada (y se restaura la vista del lienzo); la repetición automática de teclado se ignora. Con ninguna, varias o una selección que no sea una figura no ocurre nada.
-- `Alt+flecha` selecciona la figura conectada por una flecha (en cualquiera de los dos sentidos) que quede en esa dirección, la de menor ángulo y luego la más cercana. No añade historial.
+- `Alt+Mayús+flecha` selecciona la figura conectada por una flecha (en cualquiera de los dos sentidos) que quede en esa dirección, la de menor ángulo y luego la más cercana. No añade historial.
 - `Tab` / `Mayús+Tab` cambia el tipo de las figuras seleccionadas (rectángulo, rombo, elipse) conservando posición, tamaño, estilo, texto y enlaces; solo actúa si el foco está en el lienzo, no en un botón o campo, así que `Tab` sigue moviendo el foco en el resto de la interfaz. Al salir de una elipse, los bordes redondeados se toman del estilo actual.
 - Tras `Esc` en el editor de texto, la figura sigue seleccionada y el teclado en el lienzo; un segundo `Esc` deselecciona.
 - Las capas pasaron de `Ctrl+↑/↓` a `Re Pág` / `Av Pág` (con `Mayús`: al frente / al fondo).
@@ -87,21 +87,21 @@ En macOS, Ctrl equivale a Cmd.
 | Herramientas | Flecha, Línea, Texto | A (5), L (6), T (7) |
 | Herramientas | Lápiz, Borrador | P (8), E (0) |
 | Herramientas | Marco, Imagen | F, 9 |
-| Edición | Añadir a la biblioteca | Ctrl+Mayús+B |
-| Edición | Agrupar / Desagrupar | Ctrl+G / Ctrl+Mayús+G |
-| Edición | Bloquear o desbloquear | Ctrl+Mayús+L |
+| Edición | Añadir a la biblioteca | Mayús+B |
+| Edición | Agrupar / Desagrupar | Mayús+G / Mayús+U |
+| Edición | Bloquear o desbloquear | Mayús+L |
 | Edición | Voltear horizontal / vertical | Mayús+H / Mayús+V |
 | Edición | Alinear izquierda / derecha | Ctrl+Mayús+← / Ctrl+Mayús+→ |
 | Edición | Distribuir horizontal / vertical | solo botones |
 | Edición | Alinear arriba, abajo, centros | solo botones |
 | Edición | Rotar con paso de 15 grados | Mayús al girar |
 | Vista | Cuadrícula | G, Ctrl+' |
-| Vista | Guías inteligentes | Alt+S |
+| Vista | Guías inteligentes | Mayús+S |
 | Vista | Suspender ajustes al arrastrar | Ctrl |
 | Edición | Deshacer | Ctrl+Z |
 | Edición | Rehacer | Ctrl+Mayús+Z, Ctrl+Y |
 | Edición | Copiar, Cortar, Pegar | Ctrl+C, Ctrl+X, Ctrl+V |
-| Edición | Duplicar | Ctrl+D |
+| Edición | Duplicar | Mayús+D |
 | Edición | Duplicar arrastrando y conectar con una flecha (un solo rectángulo, elipse o rombo) | Ctrl + arrastrar |
 | Edición | Duplicar arrastrando sin flecha | Alt + arrastrar |
 | Edición | Seleccionar todo | Ctrl+A |
@@ -111,7 +111,7 @@ En macOS, Ctrl equivale a Cmd.
 | Edición | Subir / Bajar una capa | Re Pág / Av Pág |
 | Diagramas de flujo | Editar texto de forma o flecha | Intro |
 | Diagramas de flujo | Vista previa de nodos conectados (repite la flecha para añadir en paralelo; suelta Ctrl para insertar) | Ctrl+← / → / ↑ / ↓ |
-| Diagramas de flujo | Ir al nodo conectado | Alt+← / → / ↑ / ↓ |
+| Diagramas de flujo | Ir al nodo conectado | Alt+Mayús+← / → / ↑ / ↓ |
 | Diagramas de flujo | Cambiar tipo de figura | Tab / Mayús+Tab |
 | Edición | Editar puntos de línea o flecha | Ctrl+Intro |
 | Vista | Acercar, Alejar, 100% | Ctrl++, Ctrl+-, Ctrl+0 |
@@ -120,8 +120,8 @@ En macOS, Ctrl equivale a Cmd.
 | Vista | Atajos de teclado | ? |
 | Vista | Cancelar o deseleccionar | Esc |
 | Archivo | Abrir | Ctrl+O |
-| Archivo | Guardar, Guardar como | Ctrl+S, Ctrl+Mayús+S |
-| Archivo | Exportar imagen (PNG o SVG) | Ctrl+Mayús+E |
+| Archivo | Guardar, Guardar como | Ctrl+S, Ctrl+Alt+S |
+| Archivo | Exportar imagen (PNG o SVG) | Mayús+E |
 
 ## Estructura
 
@@ -151,7 +151,7 @@ En macOS, Ctrl equivale a Cmd.
 
 ## Guías inteligentes
 
-Activadas por defecto (botón junto al zoom o Alt+S; el campo `objectsSnapModeEnabled` del archivo se respeta si es `false`). Con tolerancia de 8 px de pantalla:
+Activadas por defecto (botón junto al zoom o Mayús+S; el campo `objectsSnapModeEnabled` del archivo se respeta si es `false`). Con tolerancia de 8 px de pantalla:
 - Alineación: bordes y centros de la selección se ajustan a bordes y centros de otras figuras, incluido "empezar donde otra termina". Línea fina magenta desde la figura más lejana hasta la selección, con marcas en los puntos alineados.
 - Espaciado igual: entre dos figuras, o continuando la separación de una fila (también un ritmo de tres o más). Se muestran segmentos con topes y el tamaño de un hueco.
 - Se aplican al mover (selección, grupo), redimensionar sin rotación (con proporción bloqueada ajusta el eje dominante), crear figuras y arrastrar puntos de líneas y flechas (que se alinean con sus otros puntos; si la flecha se enlaza a una figura no se ajusta).
