@@ -219,6 +219,7 @@ export function StylePanel() {
   const showStroke = has('rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text')
   const showFill = has('rectangle', 'ellipse', 'diamond')
   const showWidth = has('rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw')
+  const showPencilSize = types.every((t) => t === 'freedraw' || t === 'text') && types.includes('freedraw')
   const showRough = has('rectangle', 'ellipse', 'diamond', 'line', 'arrow')
   const showEdges = has('rectangle', 'diamond')
   const showCurve = has('line', 'arrow')
@@ -308,6 +309,26 @@ export function StylePanel() {
                 { value: 4, label: 'Grueso', icon: <WidthIcon w={4} /> },
               ]}
             />
+          )}
+          {showPencilSize && (
+            <Row label="Tamaño" mixed={width === null}>
+              <div className="opacity-control">
+                <input
+                  id="pencil-size-range"
+                  className="range"
+                  type="range"
+                  min={0.1}
+                  max={8}
+                  step={0.1}
+                  aria-label="Grosor del lápiz"
+                  value={width ?? defaults.strokeWidth}
+                  onChange={(e) => set({ strokeWidth: Number(e.target.value) })}
+                />
+                <output className="opacity-value" htmlFor="pencil-size-range">
+                  {width === null ? '--' : String(Math.round(width * 10) / 10)}
+                </output>
+              </div>
+            </Row>
           )}
           {showRough && (
             <Segmented<StrokeStyle>
