@@ -3,7 +3,8 @@ import { createLinear, createShape, createText } from './factory'
 import { withAbsolutePoints } from './geometry'
 import type { LinearElement } from './types'
 import { applyStyleToElement, cornerRadius, curveOf, roundnessFor, styleForNew, DEFAULT_STYLE_DEFAULTS } from './style'
-import { parseScene } from '../scene/serialize'
+import { parseScene, serializeScene } from '../scene/serialize'
+import { createFreedraw } from './freedraw'
 
 describe('roundness', () => {
   it('maps edges to excalidraw roundness per type', () => {
@@ -134,5 +135,17 @@ describe('leaving elbow', () => {
     expect(out.fixedSegments).toBeNull()
     expect(out.startIsSpecial).toBeNull()
     expect(out.endIsSpecial).toBeNull()
+  })
+})
+
+describe('pencil stroke width', () => {
+  it('applies a non-preset width to freedraw and survives a round trip', () => {
+    const pen = createFreedraw(0, 0, styleForNew(DEFAULT_STYLE_DEFAULTS, 'freedraw'))
+    const thin = applyStyleToElement(pen, { strokeWidth: 0.3 })
+    expect(thin.strokeWidth).toBe(0.3)
+    expect(thin.version).toBe(pen.version + 1)
+    expect(thin.versionNonce).not.toBe(pen.versionNonce)
+    const back = parseScene(JSON.parse(JSON.stringify(serializeScene([thin]))))
+    expect(back?.elements[0]).toMatchObject({ type: 'freedraw', strokeWidth: 0.3 })
   })
 })
