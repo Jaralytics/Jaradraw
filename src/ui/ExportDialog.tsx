@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../scene/store'
 import { Dialog } from './Dialog'
 import { CloseIcon } from './icons'
@@ -6,8 +6,11 @@ import { effectiveScale, exportBounds, exportCrop, selectExportElements } from '
 import { guardMissingFiles } from '../scene/actions'
 import { downloadBlob, renderPngBlob, renderSvgText, renderToCanvas } from '../render/export'
 import type { ExportRequest } from '../render/export'
+import { hasAnimations } from '../render/animation'
+import { GIF_MAX_SIDE, gifSize, renderGifBlob } from '../render/gif'
 
-type Format = 'png' | 'svg'
+type Format = 'png' | 'svg' | 'gif'
+const FORMATS: readonly Format[] = ['png', 'svg', 'gif']
 
 const canCopy = () => typeof ClipboardItem !== 'undefined' && !!navigator.clipboard?.write
 
@@ -22,6 +25,10 @@ export function ExportModal() {
   const [embed, setEmbed] = useState(true)
   const [preview, setPreview] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<number | null>(null)
+  const abort = useRef<AbortController | null>(null)
+  // closing the dialog (any path unmounts it) cancels a running GIF encode
+  useEffect(() => () => abort.current?.abort(), [])
 
   const hasSelection = selectedIds.length > 0
   const sel = onlySelection && hasSelection
@@ -32,7 +39,7 @@ export function ExportModal() {
     const crop = sel ? exportCrop(elements, selectedIds) : null
     const req: ExportRequest = {
       background: background ? appState.viewBackgroundColor : null,
-      scale: format === 'png' ? scale : 1,
+      scale: format === 'png' || format === 'gif' ? scale : 1,
       files,
       crop,
       embed,
@@ -76,6 +83,11 @@ export function ExportModal() {
   const bounds = exportBounds(request.list, request.req.crop ?? null)
   const usedScale = bounds ? effectiveScale(bounds.width, bounds.height, request.req.scale) : request.req.scale
   const reduced = format === 'png' && usedScale < request.req.scale - 1e-6
+  const animated = useMemo(() => hasAnimations(request.list), [request.list])
+  const gif = useMemo(
+    () => (format === 'gif' ? gifSize(request.list, request.req) : null),
+    [format, request.list, request.req],
+  )
 
   const doDownload = async () => {
     setBusy(true)
@@ -84,6 +96,14 @@ export function ExportModal() {
         const blob = await renderPngBlob(request.list, request.req)
         if (!blob) throw new Error('empty')
         downloadBlob(blob, 'jaradraw.png')
+      } else if (format === 'gif') {
+        const background = request.req.background ?? useStore.getState().appState.viewBackgroundColor
+        const controller = new AbortController()
+        abort.current = controller
+        const blob = await renderGifBlob(request.list, { ...request.req, background }, (done, total) => setProgress(done / total), controller.signal)
+        if (controller.signal.aborted) return
+        if (!blob) throw new Error('empty')
+        downloadBlob(blob, 'jaradraw.gif')
       } else {
         const svg = await renderSvgText(request.list, request.req)
         if (!svg) throw new Error('empty')
@@ -93,6 +113,7 @@ export function ExportModal() {
     } catch {
       notify('No se pudo exportar la imagen')
       setBusy(false)
+      setProgress(null)
     }
   }
 
@@ -125,7 +146,7 @@ export function ExportModal() {
           <div className="export-field" role="radiogroup" aria-label="Formato">
             <span className="style-label">Formato</span>
             <div className="segmented">
-              {(['png', 'svg'] as const).map((f) => (
+              {FORMATS.map((f) => (
                 <button
                   key={f}
                   type="button"
@@ -140,7 +161,7 @@ export function ExportModal() {
               ))}
             </div>
           </div>
-          {format === 'png' && (
+          {(format === 'png' || format === 'gif') && (
             <div className="export-field" role="radiogroup" aria-label="Escala">
               <span className="style-label">Escala</span>
               <div className="segmented">
@@ -173,10 +194,27 @@ export function ExportModal() {
             />
             <span>Solo la selección</span>
           </label>
-          <label className="check">
-            <input type="checkbox" checked={embed} onChange={(e) => setEmbed(e.target.checked)} />
-            <span>Incluir escena para poder reabrirla</span>
-          </label>
+          {format !== 'gif' && (
+            <label className="check">
+              <input type="checkbox" checked={embed} onChange={(e) => setEmbed(e.target.checked)} />
+              <span>Incluir escena para poder reabrirla</span>
+            </label>
+          )}
+          {format === 'gif' && !background && (
+            <p className="export-note" role="status">
+              El GIF no admite transparencia: se usa el color de fondo de la escena.
+            </p>
+          )}
+          {format === 'gif' && !animated && (
+            <p className="export-note" role="status">
+              No hay elementos animados: el GIF será una imagen fija.
+            </p>
+          )}
+          {gif?.capped && (
+            <p className="export-note" role="status">
+              El GIF se limita a {GIF_MAX_SIDE}px de lado: escala reducida a {gif.scale.toFixed(2)}x ({gif.width} x {gif.height} px).
+            </p>
+          )}
           {reduced && (
             <p className="export-note" role="status">
               La escala se redujo a {usedScale.toFixed(2)}x por el tamaño de la imagen.
@@ -185,13 +223,13 @@ export function ExportModal() {
         </div>
       </div>
       <div className="dialog-actions">
-        {canCopy() && (
+        {canCopy() && format !== 'gif' && (
           <button type="button" className="btn" disabled={busy} onClick={copy}>
             Copiar al portapapeles
           </button>
         )}
         <button type="button" className="btn btn-primary" data-autofocus disabled={busy} onClick={download}>
-          Descargar
+          {progress !== null ? `Codificando ${Math.round(progress * 100)}%` : 'Descargar'}
         </button>
       </div>
     </Dialog>

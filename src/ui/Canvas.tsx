@@ -8,6 +8,7 @@ import { attachClipboard, handleDroppedFiles } from '../scene/actions'
 import { onImageLoaded } from '../render/imageCache'
 import { screenToScene } from '../scene/viewport'
 import { gridSettings } from '../scene/serialize'
+import { hasAnimations } from '../render/animation'
 
 let previewCache: { source: FlowPreview; out: SceneElement[] } | null = null
 
@@ -33,10 +34,32 @@ export function Canvas() {
     let width = 0
     let height = 0
     let dpr = 1
+    // animations run only while the scene has animated elements, and never for reduced motion
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let pointerDown = false
+    let animatedSource: readonly SceneElement[] | null = null
+    let animatedCache = false
+    const sceneAnimated = (elements: readonly SceneElement[]) => {
+      if (animatedSource !== elements) {
+        animatedSource = elements
+        animatedCache = hasAnimations(elements)
+      }
+      return animatedCache
+    }
 
     const draw = () => {
       raf = 0
       const s = useStore.getState()
+      const animating = !reducedMotion.matches && sceneAnimated(s.elements)
+      // what is being edited stays still so the gesture is not jittery
+      const still = new Set<string>()
+      if (animating) {
+        if (s.draft) still.add(s.draft.id)
+        if (s.textEditor) still.add(s.textEditor.id)
+        if (s.cropping) still.add(s.cropping.id)
+        if (s.pointEdit) still.add(s.pointEdit.id)
+        if (pointerDown) for (const id of s.selectedIds) still.add(id)
+      }
       const ids = new Set(s.selectedIds)
       const grid = gridSettings(s.appState)
       const selected = ids.size ? s.elements.filter((e) => ids.has(e.id)) : []
@@ -63,7 +86,10 @@ export function Canvas() {
         editingGroupId: s.editingGroupId,
         dark: s.dark,
         files: s.files,
+        time: animating ? performance.now() : undefined,
+        stillIds: animating ? still : undefined,
       })
+      if (animating) schedule()
     }
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(draw)
@@ -79,6 +105,17 @@ export function Canvas() {
       canvas.style.height = `${height}px`
       draw()
     }
+
+    const onDown = () => {
+      pointerDown = true
+    }
+    const onUp = () => {
+      pointerDown = false
+    }
+    canvas.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    reducedMotion.addEventListener('change', schedule)
 
     resize()
     window.addEventListener('resize', resize)
@@ -105,6 +142,10 @@ export function Canvas() {
 
     return () => {
       window.removeEventListener('resize', resize)
+      canvas.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      reducedMotion.removeEventListener('change', schedule)
       unsubscribe()
       unsubscribeImages()
       window.removeEventListener('dragover', onDragOver)

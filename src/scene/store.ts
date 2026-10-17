@@ -5,6 +5,8 @@ import { getCommonBounds } from '../element/geometry'
 import { containerIdOf, isBoundText, isImage, isLabelable, isLinear, isRenderable, isText } from '../element/types'
 import type { LinearElement } from '../element/types'
 import { createText, updateElement } from '../element/factory'
+import { animationOf, canAnimate, customDataWithAnimation } from '../render/animation'
+import type { AnimationKind } from '../render/animation'
 import { cloneCentered } from '../element/clone'
 import { assignFrames, releaseFrameChildren, withFrameChildren } from '../element/frame'
 import { createImageElement, hasDataURL, sanitizeFiles } from '../element/image'
@@ -261,6 +263,8 @@ interface State {
   toggleGrid: () => void
   toggleObjectSnap: () => void
   applyStyle: (patch: StylePatch) => void
+  /** Sets (or with null clears) the animation of the selected elements that can carry it; one history entry. */
+  setAnimation: (kind: AnimationKind | null) => void
   reorderSelection: (op: ZOrderOp) => void
   nudgeSelection: (dx: number, dy: number) => void
   /**
@@ -866,6 +870,20 @@ export const useStore = create<State>()((set, get) => {
       set({ defaults: { ...defaults, ...patch }, elements: next, ...(leavePointEdit ? { pointEdit: null } : {}) })
       // a curve choice is a discrete step, never merged with the previous one
       checkpoint(`style:${Object.keys(patch).join(',')}:${selectedIds.join(',')}`, !('curve' in patch))
+    },
+
+    setAnimation: (kind) => {
+      flushNudge()
+      const { elements, selectedIds } = get()
+      const ids = new Set(selectedIds)
+      const next = mapIfChanged(elements, (e) => {
+        if (!ids.has(e.id) || e.isDeleted || e.locked) return e
+        if (kind ? !canAnimate(e, kind) || animationOf(e) === kind : animationOf(e) === null) return e
+        return updateElement(e, { customData: customDataWithAnimation(e, kind) })
+      })
+      if (next === elements) return
+      set({ elements: next })
+      checkpoint('animation')
     },
 
     reorderSelection: (op) => {

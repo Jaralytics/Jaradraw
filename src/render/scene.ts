@@ -51,6 +51,10 @@ export interface RenderParams {
   editingGroupId?: string | null
   dark?: boolean
   files?: Record<string, unknown>
+  /** Animation time in ms; animated elements are drawn static when absent. */
+  time?: number
+  /** Elements kept still even while animating (being dragged, edited or drafted). */
+  stillIds?: ReadonlySet<string>
 }
 
 // Fill of selection handles, set per frame from the theme.
@@ -81,7 +85,8 @@ export function renderScene(p: RenderParams): void {
   for (const el of p.elements) live.add(el.id)
   const faded = p.fadedIds && p.fadedIds.length ? new Set(p.fadedIds) : null
   const env = { dark: p.dark, files: p.files }
-  drawElements(ctx, p.canvas, p.elements, p.backgroundColor, p.hiddenId, undefined, faded, env)
+  const animated = { ...env, time: p.time, still: p.stillIds }
+  drawElements(ctx, p.canvas, p.elements, p.backgroundColor, p.hiddenId, undefined, faded, animated)
   if (p.draft) {
     live.add(p.draft.id)
     drawElements(ctx, p.canvas, [p.draft], p.backgroundColor, null, undefined, null, env)

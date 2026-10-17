@@ -203,6 +203,24 @@ export const CurveIcon = ({ curved, elbow = false }: { curved: boolean; elbow?: 
   </Icon>
 )
 
+export const AnimationIcon = ({ kind }: { kind: 'none' | 'flow' | 'pulse' }) => (
+  <Icon>
+    {kind === 'none' && <path d="M4.5 4.5l11 11M15.5 4.5l-11 11" />}
+    {kind === 'flow' && (
+      <>
+        <path d="M3 14.5c3-7 11-2 14-9" />
+        <circle cx="10" cy="10" r="1.6" fill="currentColor" />
+      </>
+    )}
+    {kind === 'pulse' && (
+      <>
+        <rect x="6.5" y="6.5" width="7" height="7" rx="1.5" />
+        <path d="M3.5 8V3.5H8M12 3.5h4.5V8M16.5 12v4.5H12M8 16.5H3.5V12" />
+      </>
+    )}
+  </Icon>
+)
+
 export const PencilIcon = () => (
   <Icon>
     <path d="M13.5 4.5 15.5 6.5 7 15 4 16 5 13 Z M12 6 14 8" />

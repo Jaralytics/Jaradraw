@@ -10,6 +10,7 @@ import { filesForElements, hasDataURL, isImageMime, missingFileIds } from '../el
 import { parseLibrary, serializeLibrary } from '../element/library'
 import type { SceneElement } from '../element/types'
 import { downloadBlob } from '../render/export'
+import type { AnimationKind } from '../render/animation'
 import { getImageSize } from '../render/imageCache'
 import { isTypingTarget } from '../ui/dom'
 import { pickScreenColor } from '../ui/eyedropper'
@@ -40,6 +41,11 @@ export function pickStrokeColor(): void {
   void pickScreenColor().then((c) => {
     if (c) st().applyStyle({ strokeColor: c })
   })
+}
+
+/** Applies an animation to the selection (null clears it); recorded in history. */
+export function setSelectionAnimation(kind: AnimationKind | null): void {
+  st().setAnimation(kind)
 }
 
 export function deleteAction(): void {

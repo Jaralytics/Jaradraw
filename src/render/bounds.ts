@@ -2,6 +2,7 @@ import type { Box, FrameElement, SceneElement } from '../element/types'
 import { containerIdOf, isBoundText, isFrame, isRenderable } from '../element/types'
 import { getCommonBounds } from '../element/geometry'
 import { FRAME_NAME_HEIGHT } from '../element/frame'
+import { PULSE_MAX_SCALE, animationOf } from './animation'
 
 export const EXPORT_PADDING = 16
 
@@ -50,8 +51,21 @@ export function effectiveScale(width: number, height: number, scale: number, max
   return s
 }
 
-/** Export bounds; the name drawn above each frame (also a cropped one) is included. */
-export function exportBounds(elements: readonly SceneElement[], crop: Box | null = null): ExportBounds | null {
+/** Room the pulse needs around the scene: half the growth of the largest pulsing element's diagonal. */
+function pulseGrowth(elements: readonly SceneElement[]): number {
+  let grow = 0
+  for (const e of elements) {
+    if (animationOf(e) === 'pulse') grow = Math.max(grow, ((PULSE_MAX_SCALE - 1) / 2) * Math.hypot(e.width, e.height))
+  }
+  return Math.ceil(grow)
+}
+
+/**
+ * Export bounds; the name drawn above each frame (also a cropped one) is included. With `animated`
+ * the bounds also leave room for pulsing elements at their largest.
+ */
+export function exportBounds(elements: readonly SceneElement[], crop: Box | null = null, animated = false): ExportBounds | null {
+  // a frame crop intentionally clips the pulse growth
   if (crop) {
     return { minX: crop.x, minY: crop.y - FRAME_NAME_HEIGHT, width: crop.width, height: crop.height + FRAME_NAME_HEIGHT }
   }
@@ -59,7 +73,9 @@ export function exportBounds(elements: readonly SceneElement[], crop: Box | null
   if (!b) return null
   const thick = Math.max(0, ...elements.filter((e) => e.type === 'freedraw').map((e) => e.strokeWidth * 2.5))
   const top = Math.min(b[1], ...elements.filter(isFrame).map((f) => f.y - FRAME_NAME_HEIGHT))
-  const minX = b[0] - thick - EXPORT_PADDING
-  const minY = top - thick - EXPORT_PADDING
-  return { minX, minY, width: b[2] + thick + EXPORT_PADDING - minX, height: b[3] + thick + EXPORT_PADDING - minY }
+  const grow = animated ? pulseGrowth(elements) : 0
+  const pad = thick + EXPORT_PADDING + grow
+  const minX = b[0] - pad
+  const minY = top - pad
+  return { minX, minY, width: b[2] + pad - minX, height: b[3] + pad - minY }
 }
