@@ -16,7 +16,7 @@ import {
 import { getShortcut } from './shortcuts'
 import { KeyHint, tip, tipName } from './Tooltip'
 import { pickImages } from '../scene/actions'
-import { FrameIcon, ImageIcon, LibraryIcon } from './iconsExtra'
+import { FrameIcon, ImageIcon, LibraryIcon, SlidesIcon } from './iconsExtra'
 
 const TOOLS: { tool: Tool; icon: ReactNode }[] = [
   { tool: 'selection', icon: <SelectionIcon /> },
@@ -38,6 +38,8 @@ export function Toolbar() {
   const setTool = useStore((s) => s.setTool)
   const libraryOpen = useStore((s) => s.libraryOpen)
   const toggleLibrary = useStore((s) => s.toggleLibrary)
+  const slidesOpen = useStore((s) => s.slidesOpen)
+  const toggleSlides = useStore((s) => s.toggleSlides)
 
   return (
     <div className="panel toolbar" role="toolbar" aria-label="Herramientas">
@@ -68,6 +70,16 @@ export function Toolbar() {
         onClick={toggleLibrary}
       >
         <LibraryIcon />
+      </button>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-pressed={slidesOpen}
+        aria-label="Diapositivas"
+        {...tip('view.slides')}
+        onClick={toggleSlides}
+      >
+        <SlidesIcon />
       </button>
     </div>
   )

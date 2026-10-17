@@ -1123,6 +1123,7 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
 
   function onWheel(e: WheelEvent): void {
     e.preventDefault()
+    if (st().presentation) return
     const state = st()
     const vp = state.viewport
     const unit = e.deltaMode === 1 ? 20 : 1
@@ -1236,6 +1237,19 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     if (e.ctrlKey || e.metaKey) e.preventDefault()
   }
 
+  // presentation mode is read-only: the editor gestures and shortcuts do nothing
+  const guarded = <E extends Event>(h: (e: E) => void) => (e: E) => {
+    if (!st().presentation) h(e)
+  }
+  const onPointerDownG = guarded(onPointerDown)
+  const onPointerMoveG = guarded(onPointerMove)
+  const onPointerUpG = guarded(onPointerUp)
+  const onPointerCancelG = guarded(onPointerCancel)
+  const onDoubleClickG = guarded(onDoubleClick)
+  const onMouseDownG = guarded(onMouseDown)
+  const onKeyDownG = guarded(onKeyDown)
+  const onKeyUpG = guarded(onKeyUp)
+
   const unsubscribe = useStore.subscribe(() => {
     const crop = st().cropping
     if (crop && (st().tool !== 'selection' || st().selectedIds.length !== 1 || st().selectedIds[0] !== crop.id)) {
@@ -1250,15 +1264,15 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
     if (mode.kind === 'idle') updateCursor()
   })
 
-  canvas.addEventListener('pointerdown', onPointerDown)
-  canvas.addEventListener('pointermove', onPointerMove)
-  canvas.addEventListener('pointerup', onPointerUp)
-  canvas.addEventListener('pointercancel', onPointerCancel)
-  canvas.addEventListener('dblclick', onDoubleClick)
-  canvas.addEventListener('mousedown', onMouseDown)
+  canvas.addEventListener('pointerdown', onPointerDownG)
+  canvas.addEventListener('pointermove', onPointerMoveG)
+  canvas.addEventListener('pointerup', onPointerUpG)
+  canvas.addEventListener('pointercancel', onPointerCancelG)
+  canvas.addEventListener('dblclick', onDoubleClickG)
+  canvas.addEventListener('mousedown', onMouseDownG)
   canvas.addEventListener('wheel', onWheel, { passive: false })
-  window.addEventListener('keydown', onKeyDown)
-  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('keydown', onKeyDownG)
+  window.addEventListener('keyup', onKeyUpG)
   window.addEventListener('blur', onBlur)
   window.addEventListener('pointerdown', onPointerAnywhere, true)
   document.addEventListener('visibilitychange', onVisibility)
@@ -1266,15 +1280,15 @@ export function attachInteraction(canvas: HTMLCanvasElement): () => void {
 
   return () => {
     unsubscribe()
-    canvas.removeEventListener('pointerdown', onPointerDown)
-    canvas.removeEventListener('pointermove', onPointerMove)
-    canvas.removeEventListener('pointerup', onPointerUp)
-    canvas.removeEventListener('pointercancel', onPointerCancel)
-    canvas.removeEventListener('dblclick', onDoubleClick)
-    canvas.removeEventListener('mousedown', onMouseDown)
+    canvas.removeEventListener('pointerdown', onPointerDownG)
+    canvas.removeEventListener('pointermove', onPointerMoveG)
+    canvas.removeEventListener('pointerup', onPointerUpG)
+    canvas.removeEventListener('pointercancel', onPointerCancelG)
+    canvas.removeEventListener('dblclick', onDoubleClickG)
+    canvas.removeEventListener('mousedown', onMouseDownG)
     canvas.removeEventListener('wheel', onWheel)
-    window.removeEventListener('keydown', onKeyDown)
-    window.removeEventListener('keyup', onKeyUp)
+    window.removeEventListener('keydown', onKeyDownG)
+    window.removeEventListener('keyup', onKeyUpG)
     window.removeEventListener('blur', onBlur)
     window.removeEventListener('pointerdown', onPointerAnywhere, true)
     document.removeEventListener('visibilitychange', onVisibility)

@@ -39,6 +39,69 @@ export const LibraryIcon = () => (
   </Icon>
 )
 
+export const SlidesIcon = () => (
+  <Icon>
+    <rect x="3" y="4.5" width="14" height="9" rx="1.5" />
+    <path d="M7 16.5h6M10 13.5v3" />
+  </Icon>
+)
+
+export const TransitionPanIcon = () => (
+  <Icon>
+    <rect x="2.5" y="6" width="6" height="8" rx="1" />
+    <path d="M11 10h6.5M15 7.5l2.5 2.5-2.5 2.5" />
+  </Icon>
+)
+
+export const TransitionZoomIcon = () => (
+  <Icon>
+    <rect x="7" y="7.5" width="6" height="5" rx="1" />
+    <path d="M3.5 7V3.5H7M13 3.5h3.5V7M16.5 13v3.5H13M7 16.5H3.5V13" />
+  </Icon>
+)
+
+export const PlayIcon = () => (
+  <Icon>
+    <path d="M6.5 4.5v11l9-5.5z" />
+  </Icon>
+)
+
+export const PauseIcon = () => (
+  <Icon>
+    <path d="M7 4.5v11M13 4.5v11" />
+  </Icon>
+)
+
+export const PrevIcon = () => (
+  <Icon>
+    <path d="M12 4.5 6.5 10l5.5 5.5" />
+  </Icon>
+)
+
+export const NextIcon = () => (
+  <Icon>
+    <path d="M8 4.5 13.5 10 8 15.5" />
+  </Icon>
+)
+
+export const RepeatIcon = () => (
+  <Icon>
+    <path d="M4 9V8a3 3 0 0 1 3-3h8M13 3l2 2-2 2M16 11v1a3 3 0 0 1-3 3H5M7 17l-2-2 2-2" />
+  </Icon>
+)
+
+export const ArrowUpIcon = () => (
+  <Icon>
+    <path d="M10 16V4.5M5 9.5l5-5 5 5" />
+  </Icon>
+)
+
+export const ArrowDownIcon = () => (
+  <Icon>
+    <path d="M10 4v11.5M5 10.5l5 5 5-5" />
+  </Icon>
+)
+
 export const LibraryAddIcon = () => (
   <Icon>
     <path d="M4 4.5h3v11H4zM8.5 4.5h3v11h-3z" />

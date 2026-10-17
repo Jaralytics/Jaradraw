@@ -139,7 +139,7 @@ function pointerOrCenter() {
 }
 
 function onCopy(e: ClipboardEvent, cut: boolean): void {
-  if (st().modal || isTypingTarget(e.target)) return
+  if (st().presentation || st().modal || isTypingTarget(e.target)) return
   if (cut && st().cropping) return
   const els = selectedWithLabels()
   if (els.length === 0) return
@@ -162,7 +162,7 @@ function onCopy(e: ClipboardEvent, cut: boolean): void {
 }
 
 function onPaste(e: ClipboardEvent): void {
-  if (st().modal || isTypingTarget(e.target) || st().cropping) return
+  if (st().presentation || st().modal || isTypingTarget(e.target) || st().cropping) return
   e.preventDefault()
   let text = ''
   let systemAvailable = false

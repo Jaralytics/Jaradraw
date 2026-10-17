@@ -9,6 +9,7 @@ import { onImageLoaded } from '../render/imageCache'
 import { screenToScene } from '../scene/viewport'
 import { gridSettings } from '../scene/serialize'
 import { hasAnimations } from '../render/animation'
+import { slideFrames } from '../scene/slides'
 
 let previewCache: { source: FlowPreview; out: SceneElement[] } | null = null
 
@@ -63,25 +64,31 @@ export function Canvas() {
       const ids = new Set(s.selectedIds)
       const grid = gridSettings(s.appState)
       const selected = ids.size ? s.elements.filter((e) => ids.has(e.id)) : []
+      const slides = s.presentation ? slideFrames(s.elements) : []
+      const present = s.presentation
+        ? [s.presentation.index, s.presentation.from].flatMap((i) => (i === undefined || !slides[i] ? [] : [slides[i]]))
+        : undefined
+      const presenting = s.presentation !== null
       renderScene({
         canvas,
         width,
         height,
         dpr,
         elements: s.elements,
-        draft: s.draft,
-        preview: previewElements(s.flowPreview),
+        draft: presenting ? null : s.draft,
+        preview: presenting ? undefined : previewElements(s.flowPreview),
         viewport: s.viewport,
         backgroundColor: s.appState.viewBackgroundColor,
-        selected,
-        marquee: s.marquee,
+        selected: presenting ? [] : selected,
+        marquee: presenting ? null : s.marquee,
         hiddenId: s.textEditor ? s.textEditor.id : null,
-        bindHighlight: s.bindHighlight,
-        bindAnchor: s.bindAnchor,
-        pointEdit: s.pointEdit,
-        cropping: s.cropping,
-        grid: grid.enabled ? grid : null,
-        guides: s.snapGuides,
+        bindHighlight: presenting ? null : s.bindHighlight,
+        bindAnchor: presenting ? null : s.bindAnchor,
+        pointEdit: presenting ? null : s.pointEdit,
+        cropping: presenting ? null : s.cropping,
+        grid: grid.enabled && !presenting ? grid : null,
+        guides: presenting ? undefined : s.snapGuides,
+        presentFrames: present,
         fadedIds: s.erasing,
         editingGroupId: s.editingGroupId,
         dark: s.dark,
@@ -131,6 +138,7 @@ export function Canvas() {
     const onDrop = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes('Files')) return
       e.preventDefault()
+      if (useStore.getState().presentation) return
       const files = Array.from(e.dataTransfer.files)
       if (files.length === 0) return
       void handleDroppedFiles(files, screenToScene(useStore.getState().viewport, e.clientX, e.clientY))

@@ -263,6 +263,8 @@ export interface DrawEnv {
   still?: ReadonlySet<string>
   /** Extra opacity factor for everything drawn (previews). */
   alpha?: number
+  /** Skip frame outlines and names (presentation shows only the content). */
+  hideFrames?: boolean
 }
 
 function drawImage(ctx: CanvasRenderingContext2D, el: ImageElement, opts: DrawOptions): void {
@@ -430,7 +432,7 @@ export function drawElements(
     }
   }
   for (const el of elements) if (!isFrame(el)) one(el)
-  for (const el of elements) if (isFrame(el)) one(el)
+  if (!env.hideFrames) for (const el of elements) if (isFrame(el)) one(el)
 }
 
 /** Clips to the (possibly rotated) frame box; the transform is restored to the scene space. */
