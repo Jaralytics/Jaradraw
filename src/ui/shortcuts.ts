@@ -12,6 +12,7 @@ import {
   openExportDialog,
   openFile,
   pickImages,
+  pickStrokeColor,
   saveFile,
   toggleCrop,
   zoomBy,
@@ -20,6 +21,7 @@ import {
 } from '../scene/actions'
 import type { ZOrderOp } from '../element/zorder'
 import { isCanvasFocus } from './dom'
+import { eyedropperSupported } from './eyedropper'
 
 export type Category = 'Herramientas' | 'Edición' | 'Diagramas de flujo' | 'Vista' | 'Archivo'
 export type Platform = 'mac' | 'other'
@@ -240,6 +242,14 @@ export const SHORTCUTS: Shortcut[] = [
     category: 'Edición',
     keys: [{ key: 'u', shift: true, mod: false }],
     run: () => st().ungroupSelection(),
+  },
+  {
+    id: 'edit.eyedropper',
+    label: 'Gotero: tomar color de la pantalla',
+    category: 'Edición',
+    keys: [{ key: 'i', mod: false, shift: false, alt: false }],
+    when: eyedropperSupported,
+    run: pickStrokeColor,
   },
   {
     id: 'edit.addToLibrary',

@@ -12,6 +12,7 @@ import type { SceneElement } from '../element/types'
 import { downloadBlob } from '../render/export'
 import { getImageSize } from '../render/imageCache'
 import { isTypingTarget } from '../ui/dom'
+import { pickScreenColor } from '../ui/eyedropper'
 import { DIRECTION_BY_KEY, isNode } from '../element/flowchart'
 import { parseClipboardData, serializeClipboard } from './clipboard'
 import { FileError, adoptHandle, pickAndReadFile, readFileAsScene, writeSceneFile } from './files'
@@ -32,6 +33,13 @@ export const liveElements = (): SceneElement[] => st().elements.filter((e) => !e
 export function selectedWithLabels(): SceneElement[] {
   const all = st().elements
   return withFrameChildren(all, expandWithLabels(all, getSelectedElements(st())))
+}
+
+/** Opens the screen eyedropper and uses the picked color as the stroke color. */
+export function pickStrokeColor(): void {
+  void pickScreenColor().then((c) => {
+    if (c) st().applyStyle({ strokeColor: c })
+  })
 }
 
 export function deleteAction(): void {

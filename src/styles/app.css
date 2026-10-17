@@ -217,8 +217,8 @@ button:focus-visible,
 .swatch {
   position: relative;
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
@@ -268,6 +268,19 @@ button:focus-visible,
 .swatch-custom.active::before,
 .swatch-custom.active::after {
   display: none;
+}
+.swatch-eyedropper {
+  display: grid;
+  place-items: center;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+}
+.swatch-eyedropper:hover {
+  color: var(--text);
+}
+.swatch-eyedropper svg {
+  width: 14px;
+  height: 14px;
 }
 .swatch-custom input {
   position: absolute;

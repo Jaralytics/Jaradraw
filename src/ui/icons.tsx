@@ -297,3 +297,9 @@ export const TextAlignIcon = ({ kind }: { kind: keyof typeof TEXT_ALIGN_PATHS })
     <path d={TEXT_ALIGN_PATHS[kind]} />
   </Icon>
 )
+
+export const EyedropperIcon = () => (
+  <Icon>
+    <path d="M12.5 4.5 15.5 7.5M13.8 3.2a2 2 0 0 1 2.9 2.9L15 7.8 12.2 5 13.8 3.2ZM12 5.2 5.4 11.8c-.4.4-.6.8-.6 1.3L4.5 15.5l-.2 1 1-.2 2.4-.3c.5 0 .9-.2 1.3-.6L15 9.8" />
+  </Icon>
+)

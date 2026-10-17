@@ -6,7 +6,8 @@ import { isLinear, isRenderable, isShape, isText } from '../element/types'
 import { curveOf } from '../element/style'
 import type { Curve, Edges, StyleDefaults } from '../element/style'
 import type { FillStyle, StrokeStyle } from '../element/types'
-import { TextAlignIcon, CurveIcon, DashIcon, EdgeIcon, FillIcon, HeadIcon, RoughIcon, WidthIcon, ChevronIcon } from './icons'
+import { TextAlignIcon, CurveIcon, DashIcon, EdgeIcon, FillIcon, HeadIcon, RoughIcon, WidthIcon, ChevronIcon, EyedropperIcon } from './icons'
+import { eyedropperSupported, pickScreenColor } from './eyedropper'
 import { normalizeArrowhead } from '../element/arrowhead'
 import { Popover } from './Popover'
 
@@ -84,10 +85,11 @@ interface ColorRowProps {
   label: string
   value: string | null
   presets: string[]
+  pickLabel: string
   onChange: (color: string) => void
 }
 
-function ColorRow({ label, value, presets, onChange }: ColorRowProps) {
+function ColorRow({ label, value, presets, pickLabel, onChange }: ColorRowProps) {
   const id = useId()
   const isHex = value !== null && HEX.test(value)
   const customActive = isHex && !presets.includes(value.toLowerCase())
@@ -118,6 +120,21 @@ function ColorRow({ label, value, presets, onChange }: ColorRowProps) {
             onChange={(e) => onChange(e.target.value)}
           />
         </label>
+        {eyedropperSupported() && (
+          <button
+            type="button"
+            className="swatch swatch-eyedropper"
+            aria-label={pickLabel}
+            data-tip={pickLabel}
+            onClick={() => {
+              void pickScreenColor().then((c) => {
+                if (c) onChange(c)
+              })
+            }}
+          >
+            <EyedropperIcon />
+          </button>
+        )}
       </div>
     </Row>
   )
@@ -261,9 +278,23 @@ export function StylePanel() {
   return (
     <aside className={`panel style-panel${selected.length > 0 ? ' with-bar' : ''}`} aria-label="Estilo">
       <Section id="color" title="Color">
-        {showStroke && <ColorRow label="Trazo" value={stroke} presets={STROKES} onChange={(c) => set({ strokeColor: c })} />}
+        {showStroke && (
+          <ColorRow
+            label="Trazo"
+            value={stroke}
+            presets={STROKES}
+            pickLabel="Gotero: tomar color de la pantalla"
+            onChange={(c) => set({ strokeColor: c })}
+          />
+        )}
         {showFill && (
-          <ColorRow label="Fondo" value={background} presets={BACKGROUNDS} onChange={(c) => set({ backgroundColor: c })} />
+          <ColorRow
+            label="Fondo"
+            value={background}
+            presets={BACKGROUNDS}
+            pickLabel="Gotero: tomar color de fondo de la pantalla"
+            onChange={(c) => set({ backgroundColor: c })}
+          />
         )}
         {showFill && (
           <Segmented<FillStyle>
