@@ -18,6 +18,8 @@ export interface RenderOptions {
   crop?: Box | null
   /** Caps the longest output side (previews). */
   maxSide?: number
+  /** Animation time in ms: draws animated elements at that point of their loop and pads the bounds for pulses. */
+  time?: number
 }
 
 /** Always rendered in light mode, whatever the UI theme. */
@@ -26,7 +28,7 @@ export async function renderToCanvas(
   opts: RenderOptions,
 ): Promise<HTMLCanvasElement | null> {
   const visible = elements.filter((e) => !e.isDeleted)
-  const b = exportBounds(visible, opts.crop ?? null)
+  const b = exportBounds(visible, opts.crop ?? null, opts.time !== undefined)
   if (!b) return null
   await ensureImages(opts.files, collectFileIds(visible))
   const scale = effectiveScale(b.width, b.height, opts.scale, opts.maxSide)
@@ -41,7 +43,7 @@ export async function renderToCanvas(
   }
   ctx.scale(scale, scale)
   ctx.translate(-b.minX, -b.minY)
-  drawElements(ctx, canvas, visible, opts.background ?? '#ffffff', null, undefined, null, { files: opts.files })
+  drawElements(ctx, canvas, visible, opts.background ?? '#ffffff', null, undefined, null, { files: opts.files, time: opts.time })
   return canvas
 }
 

@@ -5,6 +5,9 @@ import { getCommonBounds } from '../element/geometry'
 import { containerIdOf, isBoundText, isImage, isLabelable, isLinear, isRenderable, isText } from '../element/types'
 import type { LinearElement } from '../element/types'
 import { createText, updateElement } from '../element/factory'
+import { reorderSlides, slideFrames, withSlideDuration } from './slides'
+import { animationOf, canAnimate, customDataWithAnimation } from '../render/animation'
+import type { AnimationKind } from '../render/animation'
 import { cloneCentered } from '../element/clone'
 import { assignFrames, releaseFrameChildren, withFrameChildren } from '../element/frame'
 import { createImageElement, hasDataURL, sanitizeFiles } from '../element/image'
@@ -144,6 +147,14 @@ export type Modal =
   | { kind: 'confirm'; title: string; message: string; confirmLabel: string; onConfirm: () => void; cancelFocus?: boolean }
   | null
 
+/** Presentation mode: the current slide and what to restore on exit. */
+export interface Presentation {
+  index: number
+  /** Slide being left during the pan/zoom transition; its frame stays visible until it settles. */
+  from?: number
+  restore: { viewport: Viewport; selectedIds: readonly string[]; tool: Tool }
+}
+
 export interface CropSession {
   id: string
   /** The element and element list as they were when crop mode started. */
@@ -193,6 +204,8 @@ interface State {
   pendingImages: readonly PendingImage[] | null
   library: readonly LibraryItem[]
   libraryOpen: boolean
+  slidesOpen: boolean
+  presentation: Presentation | null
   theme: ThemePref
   dark: boolean
   /** Image binaries could not be written to IndexedDB; the scene save does not clear it. */
@@ -208,6 +221,17 @@ interface State {
   refreshTheme: () => void
   setLibrary: (items: readonly LibraryItem[]) => void
   toggleLibrary: () => void
+  toggleSlides: () => void
+  /** Moves a slide (frame) up or down in presentation order; one history entry. */
+  reorderSlide: (id: string, delta: number) => void
+  /** Sets the slide's own duration in seconds (null clears it); one history entry. */
+  setSlideDuration: (id: string, seconds: number | null) => void
+  /** Enters presentation mode at a slide; notifies instead when the scene has no frames. */
+  startPresentation: (index?: number) => void
+  setPresentationIndex: (index: number) => void
+  /** Ends the transition between slides (drops the previous slide's clip). */
+  settlePresentation: () => void
+  endPresentation: () => void
   addSelectionToLibrary: () => void
   insertLibraryItem: (id: string) => void
   deleteLibraryItem: (id: string) => void
@@ -261,6 +285,8 @@ interface State {
   toggleGrid: () => void
   toggleObjectSnap: () => void
   applyStyle: (patch: StylePatch) => void
+  /** Sets (or with null clears) the animation of the selected elements that can carry it; one history entry. */
+  setAnimation: (kind: AnimationKind | null) => void
   reorderSelection: (op: ZOrderOp) => void
   nudgeSelection: (dx: number, dy: number) => void
   /**
@@ -459,6 +485,8 @@ export const useStore = create<State>()((set, get) => {
     pendingImages: null,
     library: [],
     libraryOpen: false,
+    slidesOpen: false,
+    presentation: null,
     theme: loadThemePref(),
     dark: isDark(loadThemePref()),
     filesError: false,
@@ -506,14 +534,75 @@ export const useStore = create<State>()((set, get) => {
       if (dark !== get().dark) set({ dark })
     },
     setLibrary: (library) => set({ library }),
-    toggleLibrary: () => set({ libraryOpen: !get().libraryOpen }),
+    toggleLibrary: () => set({ libraryOpen: !get().libraryOpen, slidesOpen: false }),
+    // both side panels live on the right, so opening one closes the other
+    toggleSlides: () => set({ slidesOpen: !get().slidesOpen, libraryOpen: false }),
+    reorderSlide: (id, delta) => {
+      flushNudge()
+      const { elements } = get()
+      const next = reorderSlides(elements, id, delta)
+      if (next === elements) return
+      set({ elements: next as SceneElement[] })
+      checkpoint('slide-order')
+    },
+    setSlideDuration: (id, seconds) => {
+      flushNudge()
+      const { elements } = get()
+      const next = withSlideDuration(elements, id, seconds)
+      if (next.every((e, i) => e === elements[i])) return
+      set({ elements: next as SceneElement[] })
+      checkpoint(`slide-duration:${id}`, true)
+    },
+    startPresentation: (index = 0) => {
+      const s = get()
+      if (s.presentation || s.modal) return
+      const slides = slideFrames(s.elements)
+      if (slides.length === 0) {
+        s.notify('Crea marcos (F) para definir las diapositivas')
+        return
+      }
+      if (s.cropping) s.applyCrop()
+      if (get().textEditor) get().commitTextEditor()
+      const after = get()
+      set({
+        presentation: {
+          index: Math.max(0, Math.min(slides.length - 1, index)),
+          restore: { viewport: after.viewport, selectedIds: after.selectedIds, tool: after.tool },
+        },
+        selectedIds: [],
+        pointEdit: null,
+        marquee: null,
+        draft: null,
+        tool: 'selection',
+        editingGroupId: null,
+      })
+    },
+    setPresentationIndex: (index) => {
+      const p = get().presentation
+      if (p && p.index !== index) set({ presentation: { ...p, index, from: p.index } })
+    },
+    settlePresentation: () => {
+      const p = get().presentation
+      if (p && p.from !== undefined) set({ presentation: { index: p.index, restore: p.restore } })
+    },
+    endPresentation: () => {
+      const p = get().presentation
+      if (!p) return
+      const ids = new Set(get().elements.filter((e) => !e.isDeleted).map((e) => e.id))
+      set({
+        presentation: null,
+        viewport: p.restore.viewport,
+        selectedIds: p.restore.selectedIds.filter((id) => ids.has(id)),
+        tool: p.restore.tool,
+      })
+    },
     addSelectionToLibrary: () => {
       const { elements, files } = get()
       const sel = getSelectedElements(get())
       if (sel.length === 0) return
       const item = createLibraryItem(withFrameChildren(elements, expandWithLabels(elements, sel)), files)
       if (!item) return
-      set({ library: [item, ...get().library], libraryOpen: true })
+      set({ library: [item, ...get().library], libraryOpen: true, slidesOpen: false })
       get().notify('Añadido a la biblioteca')
     },
     insertLibraryItem: (id) => {
@@ -866,6 +955,20 @@ export const useStore = create<State>()((set, get) => {
       set({ defaults: { ...defaults, ...patch }, elements: next, ...(leavePointEdit ? { pointEdit: null } : {}) })
       // a curve choice is a discrete step, never merged with the previous one
       checkpoint(`style:${Object.keys(patch).join(',')}:${selectedIds.join(',')}`, !('curve' in patch))
+    },
+
+    setAnimation: (kind) => {
+      flushNudge()
+      const { elements, selectedIds } = get()
+      const ids = new Set(selectedIds)
+      const next = mapIfChanged(elements, (e) => {
+        if (!ids.has(e.id) || e.isDeleted || e.locked) return e
+        if (kind ? !canAnimate(e, kind) || animationOf(e) === kind : animationOf(e) === null) return e
+        return updateElement(e, { customData: customDataWithAnimation(e, kind) })
+      })
+      if (next === elements) return
+      set({ elements: next })
+      checkpoint('animation')
     },
 
     reorderSelection: (op) => {

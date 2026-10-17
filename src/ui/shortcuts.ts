@@ -12,6 +12,7 @@ import {
   openExportDialog,
   openFile,
   pickImages,
+  pickStrokeColor,
   saveFile,
   toggleCrop,
   zoomBy,
@@ -20,6 +21,7 @@ import {
 } from '../scene/actions'
 import type { ZOrderOp } from '../element/zorder'
 import { isCanvasFocus } from './dom'
+import { eyedropperSupported } from './eyedropper'
 
 export type Category = 'Herramientas' | 'Edición' | 'Diagramas de flujo' | 'Vista' | 'Archivo'
 export type Platform = 'mac' | 'other'
@@ -242,6 +244,14 @@ export const SHORTCUTS: Shortcut[] = [
     run: () => st().ungroupSelection(),
   },
   {
+    id: 'edit.eyedropper',
+    label: 'Gotero: tomar color de la pantalla',
+    category: 'Edición',
+    keys: [{ key: 'i', mod: false, shift: false, alt: false }],
+    when: eyedropperSupported,
+    run: pickStrokeColor,
+  },
+  {
     id: 'edit.addToLibrary',
     label: 'Añadir a la biblioteca',
     category: 'Edición',
@@ -372,6 +382,48 @@ export const SHORTCUTS: Shortcut[] = [
     category: 'Vista',
     keys: [],
     chips: () => [['Espacio', 'Arrastrar'], ['Rueda']],
+  },
+  {
+    id: 'view.slides',
+    label: 'Diapositivas',
+    category: 'Vista',
+    keys: [{ key: 'p', shift: true, mod: false }],
+    run: () => st().toggleSlides(),
+  },
+  {
+    id: 'view.present',
+    label: 'Presentar',
+    category: 'Vista',
+    keys: [{ key: 'f5', mod: false, display: 'F5' }],
+    run: () => st().startPresentation(0),
+  },
+  {
+    id: 'present.nav',
+    label: 'Presentación: siguiente / anterior',
+    category: 'Vista',
+    keys: [],
+    chips: () => [['→'], ['←'], ['Espacio']],
+  },
+  {
+    id: 'present.ends',
+    label: 'Presentación: primera / última',
+    category: 'Vista',
+    keys: [],
+    chips: () => [['Inicio'], ['Fin']],
+  },
+  {
+    id: 'present.play',
+    label: 'Presentación: reproducir o pausar',
+    category: 'Vista',
+    keys: [],
+    chips: () => [['P']],
+  },
+  {
+    id: 'present.exit',
+    label: 'Presentación: salir',
+    category: 'Vista',
+    keys: [],
+    chips: () => [['Esc']],
   },
   {
     id: 'view.help',

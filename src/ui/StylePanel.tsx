@@ -3,10 +3,14 @@ import type { ReactNode } from 'react'
 import { useStore } from '../scene/store'
 import type { LinearElement, SceneElement, TextElement } from '../element/types'
 import { isLinear, isRenderable, isShape, isText } from '../element/types'
+import { animationOf, canAnimate } from '../render/animation'
+import type { AnimationKind } from '../render/animation'
+import { setSelectionAnimation } from '../scene/actions'
 import { curveOf } from '../element/style'
 import type { Curve, Edges, StyleDefaults } from '../element/style'
 import type { FillStyle, StrokeStyle } from '../element/types'
-import { TextAlignIcon, CurveIcon, DashIcon, EdgeIcon, FillIcon, HeadIcon, RoughIcon, WidthIcon, ChevronIcon } from './icons'
+import { TextAlignIcon, CurveIcon, DashIcon, EdgeIcon, FillIcon, HeadIcon, RoughIcon, AnimationIcon, WidthIcon, ChevronIcon, EyedropperIcon } from './icons'
+import { eyedropperSupported, pickScreenColor } from './eyedropper'
 import { normalizeArrowhead } from '../element/arrowhead'
 import { Popover } from './Popover'
 
@@ -84,10 +88,11 @@ interface ColorRowProps {
   label: string
   value: string | null
   presets: string[]
+  pickLabel: string
   onChange: (color: string) => void
 }
 
-function ColorRow({ label, value, presets, onChange }: ColorRowProps) {
+function ColorRow({ label, value, presets, pickLabel, onChange }: ColorRowProps) {
   const id = useId()
   const isHex = value !== null && HEX.test(value)
   const customActive = isHex && !presets.includes(value.toLowerCase())
@@ -118,6 +123,21 @@ function ColorRow({ label, value, presets, onChange }: ColorRowProps) {
             onChange={(e) => onChange(e.target.value)}
           />
         </label>
+        {eyedropperSupported() && (
+          <button
+            type="button"
+            className="swatch swatch-eyedropper"
+            aria-label={pickLabel}
+            data-tip={pickLabel}
+            onClick={() => {
+              void pickScreenColor().then((c) => {
+                if (c) onChange(c)
+              })
+            }}
+          >
+            <EyedropperIcon />
+          </button>
+        )}
       </div>
     </Row>
   )
@@ -256,14 +276,33 @@ export function StylePanel() {
   const opacity = pick(all, (e) => e.opacity, defaults.opacity)
 
   const set = (patch: Partial<StyleDefaults>) => applyStyle(patch)
+  // Animation only applies to a real selection (it is not a drawing default).
+  const flowTargets = selected.filter((e) => canAnimate(e, 'flow'))
+  const pulseTargets = selected.filter((e) => canAnimate(e, 'pulse'))
+  const showAnimation = flowTargets.length > 0 || pulseTargets.length > 0
+  const animation = common([...flowTargets, ...pulseTargets].map((e) => animationOf(e) ?? 'none'))
   const showTrazo = showWidth || showRough || showEdges || showCurve
 
   return (
     <aside className={`panel style-panel${selected.length > 0 ? ' with-bar' : ''}`} aria-label="Estilo">
       <Section id="color" title="Color">
-        {showStroke && <ColorRow label="Trazo" value={stroke} presets={STROKES} onChange={(c) => set({ strokeColor: c })} />}
+        {showStroke && (
+          <ColorRow
+            label="Trazo"
+            value={stroke}
+            presets={STROKES}
+            pickLabel="Gotero: tomar color de la pantalla"
+            onChange={(c) => set({ strokeColor: c })}
+          />
+        )}
         {showFill && (
-          <ColorRow label="Fondo" value={background} presets={BACKGROUNDS} onChange={(c) => set({ backgroundColor: c })} />
+          <ColorRow
+            label="Fondo"
+            value={background}
+            presets={BACKGROUNDS}
+            pickLabel="Gotero: tomar color de fondo de la pantalla"
+            onChange={(c) => set({ backgroundColor: c })}
+          />
         )}
         {showFill && (
           <Segmented<FillStyle>
@@ -400,6 +439,20 @@ export function StylePanel() {
               { value: 'left', label: 'Izquierda', icon: <TextAlignIcon kind="left" /> },
               { value: 'center', label: 'Centro', icon: <TextAlignIcon kind="center" /> },
               { value: 'right', label: 'Derecha', icon: <TextAlignIcon kind="right" /> },
+            ]}
+          />
+        </Section>
+      )}
+      {showAnimation && (
+        <Section id="animacion" title="Animación">
+          <Segmented<AnimationKind | 'none'>
+            label="Efecto"
+            value={animation}
+            onChange={(v) => setSelectionAnimation(v === 'none' ? null : v)}
+            options={[
+              { value: 'none', label: 'Ninguna', icon: <AnimationIcon kind="none" /> },
+              ...(flowTargets.length ? [{ value: 'flow' as const, label: 'Recorrido', icon: <AnimationIcon kind="flow" /> }] : []),
+              ...(pulseTargets.length ? [{ value: 'pulse' as const, label: 'Pulso', icon: <AnimationIcon kind="pulse" /> }] : []),
             ]}
           />
         </Section>

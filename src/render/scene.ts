@@ -51,6 +51,12 @@ export interface RenderParams {
   editingGroupId?: string | null
   dark?: boolean
   files?: Record<string, unknown>
+  /** Animation time in ms; animated elements are drawn static when absent. */
+  time?: number
+  /** Elements kept still even while animating (being dragged, edited or drafted). */
+  stillIds?: ReadonlySet<string>
+  /** Presentation: only the union of these frames is drawn (clipped), without frame outlines or names. */
+  presentFrames?: readonly SceneElement[]
 }
 
 // Fill of selection handles, set per frame from the theme.
@@ -81,7 +87,17 @@ export function renderScene(p: RenderParams): void {
   for (const el of p.elements) live.add(el.id)
   const faded = p.fadedIds && p.fadedIds.length ? new Set(p.fadedIds) : null
   const env = { dark: p.dark, files: p.files }
-  drawElements(ctx, p.canvas, p.elements, p.backgroundColor, p.hiddenId, undefined, faded, env)
+  const animated = { ...env, time: p.time, still: p.stillIds, hideFrames: !!p.presentFrames?.length }
+  if (p.presentFrames?.length) {
+    // rotated frames clip along their rotated outline; equal winding makes the paths a union
+    ctx.beginPath()
+    for (const f of p.presentFrames) {
+      getElementCorners(f).forEach((c, i) => (i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y)))
+      ctx.closePath()
+    }
+    ctx.clip()
+  }
+  drawElements(ctx, p.canvas, p.elements, p.backgroundColor, p.hiddenId, undefined, faded, animated)
   if (p.draft) {
     live.add(p.draft.id)
     drawElements(ctx, p.canvas, [p.draft], p.backgroundColor, null, undefined, null, env)

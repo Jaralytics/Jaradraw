@@ -217,8 +217,8 @@ button:focus-visible,
 .swatch {
   position: relative;
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
@@ -268,6 +268,19 @@ button:focus-visible,
 .swatch-custom.active::before,
 .swatch-custom.active::after {
   display: none;
+}
+.swatch-eyedropper {
+  display: grid;
+  place-items: center;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+}
+.swatch-eyedropper:hover {
+  color: var(--text);
+}
+.swatch-eyedropper svg {
+  width: 14px;
+  height: 14px;
 }
 .swatch-custom input {
   position: absolute;
@@ -1039,4 +1052,144 @@ kbd {
     bottom: 112px;
     max-height: calc(100vh - 270px);
   }
+}
+
+.slides-panel .btn.btn-primary {
+  align-self: stretch;
+}
+.slide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.slide-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.slide-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.slide-row-sub {
+  justify-content: space-between;
+  padding-left: 22px;
+}
+.slide-num {
+  width: 18px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.slide-name {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.slide-name:hover {
+  background: var(--hover);
+}
+.slide-duration {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.slide-duration .text-input {
+  width: 56px;
+  height: 28px;
+  padding: 0 6px;
+  text-align: center;
+}
+
+.presentation {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  cursor: default;
+}
+.presentation[data-idle='true'] {
+  cursor: none;
+}
+.present-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+}
+.present-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.present-bar {
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  cursor: default;
+  transition: opacity 0.25s ease;
+}
+.present-bar[data-hidden='true'] {
+  opacity: 0;
+  pointer-events: none;
+}
+.present-counter {
+  min-width: 56px;
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.present-sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.present-seconds {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.present-seconds .text-input {
+  width: 52px;
+  height: 30px;
+  padding: 0 6px;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .present-bar {
+    transition: none;
+  }
+}
+
+.slide-transition {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
 }

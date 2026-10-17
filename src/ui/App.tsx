@@ -12,6 +12,8 @@ import { ModalRoot } from './Modals'
 import { CloseIcon, HelpIcon } from './icons'
 import { ActionBar } from './ActionBar'
 import { TooltipLayer, tip } from './Tooltip'
+import { SlidesPanel } from './SlidesPanel'
+import { Presentation } from './Presentation'
 
 function Notice({ text, onClose }: { text: string; onClose: () => void }) {
   return (
@@ -32,6 +34,7 @@ export function App() {
   const dark = useStore((s) => s.dark)
   const refreshTheme = useStore((s) => s.refreshTheme)
   const dismissNotice = useStore((s) => s.dismissNotice)
+  const presenting = useStore((s) => s.presentation !== null)
   const empty = useStore((s) => s.elements.every((e) => e.isDeleted) && s.draft === null && s.textEditor === null)
   const [hidden, setHidden] = useState({ save: false, files: false })
 
@@ -51,24 +54,30 @@ export function App() {
   return (
     <>
       <Canvas />
-      <TextEditor />
-      <Toolbar />
-      <StylePanel />
-      <ActionBar />
-      <ZoomControls />
-      <LibraryPanel />
-      <FileMenu />
-      <TemplateMenu />
-      <button
-        type="button"
-        className="panel icon-btn help-btn"
-        aria-label="Atajos de teclado"
-        {...tip('view.help')}
-        onClick={() => showModal({ kind: 'shortcuts' })}
-      >
-        <HelpIcon />
-      </button>
-      {empty && <p className="empty-hint">Elige una herramienta para empezar o pulsa ? para ver los atajos. Con una forma seleccionada, mantén Ctrl y pulsa una flecha para previsualizar nodos conectados (repite para añadir en paralelo) y suelta Ctrl para insertarlos</p>}
+      <Presentation />
+      {!presenting && (
+        <>
+          <TextEditor />
+          <Toolbar />
+          <StylePanel />
+          <ActionBar />
+          <ZoomControls />
+          <LibraryPanel />
+          <SlidesPanel />
+          <FileMenu />
+          <TemplateMenu />
+          <button
+            type="button"
+            className="panel icon-btn help-btn"
+            aria-label="Atajos de teclado"
+            {...tip('view.help')}
+            onClick={() => showModal({ kind: 'shortcuts' })}
+          >
+            <HelpIcon />
+          </button>
+        </>
+      )}
+      {empty && !presenting && <p className="empty-hint">Elige una herramienta para empezar o pulsa ? para ver los atajos. Con una forma seleccionada, mantén Ctrl y pulsa una flecha para previsualizar nodos conectados (repite para añadir en paralelo) y suelta Ctrl para insertarlos</p>}
       <TooltipLayer />
       <div className="notices" role="status">
         {saveError && !hidden.save && (
@@ -79,7 +88,7 @@ export function App() {
         )}
         {notice && <Notice text={notice} onClose={dismissNotice} />}
       </div>
-      <ModalRoot />
+      {!presenting && <ModalRoot />}
     </>
   )
 }

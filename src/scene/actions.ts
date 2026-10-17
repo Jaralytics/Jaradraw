@@ -10,8 +10,10 @@ import { filesForElements, hasDataURL, isImageMime, missingFileIds } from '../el
 import { parseLibrary, serializeLibrary } from '../element/library'
 import type { SceneElement } from '../element/types'
 import { downloadBlob } from '../render/export'
+import type { AnimationKind } from '../render/animation'
 import { getImageSize } from '../render/imageCache'
 import { isTypingTarget } from '../ui/dom'
+import { pickScreenColor } from '../ui/eyedropper'
 import { DIRECTION_BY_KEY, isNode } from '../element/flowchart'
 import { parseClipboardData, serializeClipboard } from './clipboard'
 import { FileError, adoptHandle, pickAndReadFile, readFileAsScene, writeSceneFile } from './files'
@@ -32,6 +34,18 @@ export const liveElements = (): SceneElement[] => st().elements.filter((e) => !e
 export function selectedWithLabels(): SceneElement[] {
   const all = st().elements
   return withFrameChildren(all, expandWithLabels(all, getSelectedElements(st())))
+}
+
+/** Opens the screen eyedropper and uses the picked color as the stroke color. */
+export function pickStrokeColor(): void {
+  void pickScreenColor().then((c) => {
+    if (c) st().applyStyle({ strokeColor: c })
+  })
+}
+
+/** Applies an animation to the selection (null clears it); recorded in history. */
+export function setSelectionAnimation(kind: AnimationKind | null): void {
+  st().setAnimation(kind)
 }
 
 export function deleteAction(): void {
@@ -125,7 +139,7 @@ function pointerOrCenter() {
 }
 
 function onCopy(e: ClipboardEvent, cut: boolean): void {
-  if (st().modal || isTypingTarget(e.target)) return
+  if (st().presentation || st().modal || isTypingTarget(e.target)) return
   if (cut && st().cropping) return
   const els = selectedWithLabels()
   if (els.length === 0) return
@@ -148,7 +162,7 @@ function onCopy(e: ClipboardEvent, cut: boolean): void {
 }
 
 function onPaste(e: ClipboardEvent): void {
-  if (st().modal || isTypingTarget(e.target) || st().cropping) return
+  if (st().presentation || st().modal || isTypingTarget(e.target) || st().cropping) return
   e.preventDefault()
   let text = ''
   let systemAvailable = false

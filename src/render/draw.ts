@@ -17,6 +17,7 @@ import type { ArrowheadKind } from '../element/arrowhead'
 import { getBoxCenter, getElementBox } from '../element/geometry'
 import { fontStack, fontString } from '../element/text'
 import { cornerRadius } from '../element/style'
+import { animationOf, flowDotPosition, flowDotRadius, pulseScale } from './animation'
 
 export const generator = rough.generator()
 const identity = (c: string) => c
@@ -247,13 +248,23 @@ export interface DrawOptions {
   dark?: boolean
   /** File map used to resolve image elements. */
   files?: Record<string, unknown>
+  /** Animation time in ms; the flow dot of an animated line is drawn only when set. */
+  time?: number
+  /** Render-only pulse: uniform scale about a point (the element's own center, or its container's). */
+  pulse?: { scale: number; center: Vec2 }
 }
 
 export interface DrawEnv {
   dark?: boolean
   files?: Record<string, unknown>
+  /** Animation time in ms; when set, animated elements are drawn at that point of their loop. */
+  time?: number
+  /** Elements that stay still even when animating (being dragged or edited). */
+  still?: ReadonlySet<string>
   /** Extra opacity factor for everything drawn (previews). */
   alpha?: number
+  /** Skip frame outlines and names (presentation shows only the content). */
+  hideFrames?: boolean
 }
 
 function drawImage(ctx: CanvasRenderingContext2D, el: ImageElement, opts: DrawOptions): void {
@@ -309,6 +320,16 @@ function drawFrame(ctx: CanvasRenderingContext2D, el: FrameElement, col: (c: str
   ctx.fillText(frameLabel(el), 0, -6)
 }
 
+/** The traveling dot of an animated line, in the element's local space. */
+function drawFlowDot(ctx: CanvasRenderingContext2D, el: LinearElement, time: number, col: (c: string) => string): void {
+  if (el.points.length < 2) return
+  const p = flowDotPosition(el, time)
+  ctx.fillStyle = col(el.strokeColor)
+  ctx.beginPath()
+  ctx.arc(p.x, p.y, flowDotRadius(el), 0, Math.PI * 2)
+  ctx.fill()
+}
+
 /** Draws one element in scene space; the caller sets up the viewport transform. */
 export function drawElement(
   ctx: CanvasRenderingContext2D,
@@ -324,6 +345,12 @@ export function drawElement(
   const c = getBoxCenter(getElementBox(el))
   ctx.save()
   ctx.globalAlpha = Math.max(0, Math.min(1, el.opacity / 100)) * (opts.fade ?? 1)
+  if (opts.pulse) {
+    const { scale, center } = opts.pulse
+    ctx.translate(center.x, center.y)
+    ctx.scale(scale, scale)
+    ctx.translate(-center.x, -center.y)
+  }
   if (el.angle !== 0) {
     ctx.translate(c.x, c.y)
     ctx.rotate(el.angle)
@@ -349,6 +376,7 @@ export function drawElement(
   } else {
     const rc = getRough(canvas)
     for (const d of getDrawables(el as ShapeElement | LinearElement, bg, opts.dark)) rc.draw(d)
+    if (opts.time !== undefined && isLinear(el) && animationOf(el) === 'flow') drawFlowDot(ctx, el, opts.time, col)
   }
   ctx.restore()
 }
@@ -374,6 +402,14 @@ export function drawElements(
     if (e.type === 'arrow') arrows.add(e.id)
     if (isFrame(e)) frames.set(e.id, e)
   }
+  const byId = env.time !== undefined ? new Map(elements.map((e) => [e.id, e])) : null
+  /** Pulse of the element, or of its container for a bound label; none while the element stays still. */
+  const pulseOf = (el: SceneElement): DrawOptions['pulse'] => {
+    if (!byId || env.time === undefined) return undefined
+    const owner = isBoundText(el) ? byId.get(containerIdOf(el) as string) : el
+    if (!owner || owner.isDeleted || env.still?.has(owner.id) || animationOf(owner) !== 'pulse') return undefined
+    return { scale: pulseScale(env.time), center: getBoxCenter(getElementBox(owner)) }
+  }
   const one = (el: SceneElement) => {
     if (el.id === hiddenId) return
     ctx.save()
@@ -386,6 +422,8 @@ export function drawElements(
         fade: (faded && (faded.has(el.id) || (isBoundText(el) && faded.has(containerIdOf(el) as string))) ? 0.3 : 1) * (env.alpha ?? 1),
         dark: env.dark,
         files: env.files,
+        time: env.time !== undefined && !env.still?.has(el.id) ? env.time : undefined,
+        pulse: pulseOf(el),
       })
     } catch {
       onError?.()
@@ -394,7 +432,7 @@ export function drawElements(
     }
   }
   for (const el of elements) if (!isFrame(el)) one(el)
-  for (const el of elements) if (isFrame(el)) one(el)
+  if (!env.hideFrames) for (const el of elements) if (isFrame(el)) one(el)
 }
 
 /** Clips to the (possibly rotated) frame box; the transform is restored to the scene space. */
